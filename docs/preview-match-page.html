@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>qual-match · 清单匹配</title>
+<style>
+  :root{
+    color-scheme: light;
+    --ep-primary:#409eff;
+    --ep-success:#67c23a;
+    --ep-warning:#e6a23c;
+    --ep-danger:#f56c6c;
+    --ep-info:#909399;
+    --border:#e4e7ed;
+    --border-light:#ebeef5;
+    --text-main:#303133;
+    --text-reg:#606266;
+    --text-sec:#909399;
+    --bg-page:#f5f7fa;
+    --aside:#304156;
+    --aside-active:#263445;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Helvetica Neue",Helvetica,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",Arial,sans-serif;
+    background:var(--bg-page);color:var(--text-main);font-size:14px;line-height:1.5;
+  }
+  .app{display:flex;min-height:100vh}
+
+  /* ===== 侧边栏 ===== */
+  .aside{width:210px;background:var(--aside);color:#bfcbd9;flex-shrink:0;display:flex;flex-direction:column}
+  .logo{height:60px;display:flex;align-items:center;gap:10px;padding:0 20px;color:#fff;font-size:17px;font-weight:600;border-bottom:1px solid rgba(255,255,255,.08)}
+  .logo .mark{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,#409eff,#67c23a);display:flex;align-items:center;justify-content:center;font-size:14px}
+  .logo small{font-size:11px;font-weight:400;color:#8896aa;display:block;margin-top:1px}
+  .menu{padding:10px 0;flex:1}
+  .menu-item{height:48px;display:flex;align-items:center;gap:12px;padding:0 20px;cursor:pointer;font-size:14px;color:#bfcbd9}
+  .menu-item .ico{font-size:16px;width:18px;text-align:center}
+  .menu-item:hover{background:#263445;color:#fff}
+  .menu-item.active{background:var(--ep-primary);color:#fff}
+  .aside-foot{padding:14px 20px;font-size:11px;color:#6b7a90;border-top:1px solid rgba(255,255,255,.06)}
+
+  /* ===== 主区 ===== */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:60px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;gap:14px}
+  .crumb{font-size:13px;color:var(--text-sec)}
+  .crumb b{color:var(--text-main);font-weight:600}
+  .topbar .spacer{flex:1}
+  .topbar .uic{width:32px;height:32px;border-radius:50%;background:#ecf5ff;color:var(--ep-primary);display:flex;align-items:center;justify-content:center;font-size:14px}
+
+  .content{padding:20px 24px;flex:1}
+
+  /* 工具栏 */
+  .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+  .btn{height:34px;padding:0 16px;border-radius:6px;border:1px solid var(--border);background:#fff;color:var(--text-reg);font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .btn:hover{color:var(--ep-primary);border-color:#c6e2ff;background:#ecf5ff}
+  .btn.primary{background:var(--ep-primary);border-color:var(--ep-primary);color:#fff}
+  .btn.primary:hover{background:#66b1ff;border-color:#66b1ff;color:#fff}
+  .btn.success{background:var(--ep-success);border-color:var(--ep-success);color:#fff}
+  .btn.success:hover{background:#85ce61;border-color:#85ce61}
+  .select{height:34px;padding:0 12px;border-radius:6px;border:1px solid var(--border);background:#fff;color:var(--text-reg);font-size:13px;display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+  .select .caret{color:var(--text-sec);font-size:10px}
+  .tspacer{flex:1}
+
+  /* 概览卡 */
+  .overview{background:#fff;border:1px solid var(--border-light);border-radius:8px;padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;gap:32px}
+  .ov-name{font-size:15px;font-weight:600}
+  .ov-name .tagn{font-size:11px;color:var(--text-sec);font-weight:400;margin-left:6px}
+  .ov-stat{display:flex;flex-direction:column;gap:2px}
+  .ov-stat .num{font-size:22px;font-weight:700;line-height:1}
+  .ov-stat .lbl{font-size:12px;color:var(--text-sec)}
+  .ov-stat.green .num{color:var(--ep-success)}
+  .ov-stat.red .num{color:var(--ep-danger)}
+  .ov-bar-wrap{flex:1;max-width:280px}
+  .ov-bar-wrap .ratio{display:flex;justify-content:space-between;font-size:12px;color:var(--text-sec);margin-bottom:6px}
+  .ov-bar{height:10px;border-radius:5px;background:#f0f2f5;overflow:hidden}
+  .ov-bar i{display:block;height:100%;width:76%;background:linear-gradient(90deg,#67c23a,#95d475);border-radius:5px}
+
+  /* 过滤条 */
+  .filterbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:13px;color:var(--text-reg)}
+  .chk{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+  .chk .box{width:15px;height:15px;border:1px solid var(--border);border-radius:3px;display:inline-block}
+  .chk.on .box{background:var(--ep-primary);border-color:var(--ep-primary);position:relative}
+  .chk.on .box::after{content:"";position:absolute;left:4.5px;top:1.5px;width:4px;height:8px;border:2px solid #fff;border-top:0;border-left:0;transform:rotate(45deg)}
+  .search{margin-left:auto;height:32px;width:230px;border:1px solid var(--border);border-radius:6px;padding:0 12px;display:flex;align-items:center;gap:8px;color:var(--text-sec)}
+  .search input{border:0;outline:0;flex:1;font-size:13px;color:var(--text-main)}
+
+  /* 表格 */
+  .tablewrap{background:#fff;border:1px solid var(--border-light);border-radius:8px;overflow:hidden}
+  table{width:100%;border-collapse:collapse}
+  thead th{background:#fafafa;color:var(--text-main);font-weight:600;font-size:13px;text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-light);white-space:nowrap}
+  thead th.center{text-align:center}
+  tbody td{padding:11px 14px;border-bottom:1px solid var(--border-light);font-size:13px;color:var(--text-reg);vertical-align:middle}
+  tbody td.center{text-align:center}
+  tbody tr:hover{background:#f5f7fa}
+  tbody tr.uncovered{background:#fef0f0}
+  tbody tr.uncovered:hover{background:#fde2e2}
+  .stdcode{font-family:"SFMono-Regular",Consolas,Monaco,monospace;color:var(--text-main);font-weight:500;white-space:nowrap}
+  .stdname{color:var(--text-reg);max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* 标签 */
+  .tag{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 9px;border-radius:4px;font-size:12px;line-height:1;border:1px solid transparent;cursor:default}
+  .tag.t-success{background:#f0f9eb;color:#67c23a;border-color:#e1f3d8}
+  .tag.t-warning{background:#fdf6ec;color:#e6a23c;border-color:#faecd8}
+  .tag.t-info{background:#f4f4f5;color:#909399;border-color:#e9e9eb}
+  .tag.t-primary{background:#ecf5ff;color:#409eff;border-color:#d9ecff}
+  .dash{color:#c0c4cc}
+  .clickable{cursor:pointer}
+  .clickable:hover{filter:brightness(.97);text-decoration:none;box-shadow:0 0 0 2px rgba(64,158,255,.15)}
+
+  /* 抽屉 */
+  .drawer-mask{position:fixed;inset:0;background:rgba(0,0,0,.5)}
+  .drawer{position:fixed;top:0;right:0;bottom:0;width:520px;background:#fff;box-shadow:-4px 0 16px rgba(0,0,0,.12);display:flex;flex-direction:column}
+  .dr-head{padding:18px 22px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;justify-content:space-between}
+  .dr-head h3{font-size:16px;font-weight:600}
+  .dr-head .code{font-family:Consolas,monospace;color:var(--ep-primary);font-size:13px;margin-top:3px;font-weight:500}
+  .dr-close{cursor:pointer;color:var(--text-sec);font-size:20px;line-height:1}
+  .dr-body{padding:18px 22px;overflow:auto;flex:1}
+  .dr-sec{margin-bottom:22px}
+  .dr-sec-title{font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .dr-sec-title .cnt{font-size:11px;font-weight:400;color:#fff;background:var(--ep-success);border-radius:9px;padding:1px 7px}
+  .dr-sec-title .cnt.zero{background:#c0c4cc}
+  .hit{border:1px solid var(--border-light);border-radius:6px;padding:11px 13px;margin-bottom:9px}
+  .hit .lab{font-size:13px;font-weight:600;color:var(--text-main)}
+  .hit .labno{font-family:Consolas,monospace;font-size:11px;color:var(--text-sec);font-weight:400;margin-left:6px}
+  .hit .meta{margin-top:6px;font-size:12px;color:var(--text-reg);display:flex;flex-wrap:wrap;gap:4px 16px}
+  .hit .meta span b{color:var(--text-sec);font-weight:400}
+  .empty{font-size:12px;color:var(--text-sec);padding:6px 0}
+  .caplib-box{border:1px solid #e1f3d8;background:#f0f9eb;border-radius:6px;padding:12px 14px;font-size:13px;color:#529b2e}
+  .caplib-box .dom{color:var(--text-reg);font-size:12px;margin-top:6px}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- 侧边栏 -->
+  <aside class="aside">
+    <div class="logo">
+      <div class="mark">✓</div>
+      <div>qual-match<small>资质匹配核查</small></div>
+    </div>
+    <nav class="menu">
+      <div class="menu-item active"><span class="ico">📋</span>清单匹配</div>
+      <div class="menu-item"><span class="ico">🔍</span>综合查询</div>
+      <div class="menu-item"><span class="ico">🗂️</span>资质管理</div>
+      <div class="menu-item"><span class="ico">⚙️</span>设置</div>
+    </nav>
+    <div class="aside-foot">本地 SQLite · 单用户<br>v0.1.0 · MVP</div>
+  </aside>
+
+  <!-- 主区 -->
+  <div class="main">
+    <header class="topbar">
+      <div class="crumb">清单匹配 / <b>2026 检测能力核查清单</b></div>
+      <div class="spacer"></div>
+      <div class="uic">我</div>
+    </header>
+
+    <div class="content">
+      <!-- 工具栏 -->
+      <div class="toolbar">
+        <button class="btn primary">⬆ 上传 Excel</button>
+        <button class="btn">📝 粘贴标准号</button>
+        <div class="select">我的清单：2026 检测能力核查清单 <span class="caret">▼</span></div>
+        <div class="tspacer"></div>
+        <button class="btn success">⬇ 导出匹配结果</button>
+      </div>
+
+      <!-- 概览卡 -->
+      <div class="overview">
+        <div class="ov-name">2026 检测能力核查清单 <span class="tagn">导入于 2026-06-02</span></div>
+        <div class="ov-stat"><span class="num">128</span><span class="lbl">标准总数</span></div>
+        <div class="ov-stat green"><span class="num">97</span><span class="lbl">已覆盖</span></div>
+        <div class="ov-stat red"><span class="num">31</span><span class="lbl">未覆盖</span></div>
+        <div class="ov-bar-wrap">
+          <div class="ratio"><span>覆盖率</span><b style="color:#67c23a">76%</b></div>
+          <div class="ov-bar"><i></i></div>
+        </div>
+      </div>
+
+      <!-- 过滤条 -->
+      <div class="filterbar">
+        <span class="chk"><span class="box"></span>只看未覆盖</span>
+        <span class="chk on"><span class="box"></span>全部</span>
+        <span class="chk"><span class="box"></span>省级CMA</span>
+        <span class="chk"><span class="box"></span>CNAS</span>
+        <span class="chk"><span class="box"></span>国家CMA</span>
+        <span class="chk"><span class="box"></span>一单一库</span>
+        <div class="search">🔍 <input placeholder="按标准号 / 名称过滤"></div>
+      </div>
+
+      <!-- 结果表 -->
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:160px">标准号</th>
+              <th>标准名称</th>
+              <th class="center" style="width:110px">省级 CMA</th>
+              <th class="center" style="width:90px">CNAS</th>
+              <th class="center" style="width:100px">国家 CMA</th>
+              <th class="center" style="width:120px">一单一库</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="stdcode">GB/T 3325-2024</td>
+              <td class="stdname">金属家具通用技术条件</td>
+              <td class="center"><span class="tag t-success clickable">✓ 3 机构</span></td>
+              <td class="center"><span class="tag t-success clickable">✓ 1</span></td>
+              <td class="center"><span class="tag t-success clickable">✓ 2</span></td>
+              <td class="center"><span class="tag t-success">🟢 在库</span></td>
+            </tr>
+            <tr>
+              <td class="stdcode">GB/T 17657-2022</td>
+              <td class="stdname">人造板及饰面人造板理化性能试验方法</td>
+              <td class="center"><span class="tag t-success clickable">✓ 2 机构</span></td>
+              <td class="center"><span class="dash">—</span></td>
+              <td class="center"><span class="tag t-success clickable">✓ 1</span></td>
+              <td class="center"><span class="tag t-success">🟢 在库</span></td>
+            </tr>
+            <tr>
+              <td class="stdcode">GB 18580-2017</td>
+              <td class="stdname">室内装饰装修材料 人造板甲醛释放限量</td>
+              <td class="center"><span class="dash">—</span></td>
+              <td class="center"><span class="tag t-success clickable">✓ 2</span></td>
+              <td class="center"><span class="dash">—</span></td>
+              <td class="center"><span class="tag t-warning">🟡 仅引用</span></td>
+            </tr>
+            <tr class="uncovered">
+              <td class="stdcode">GB/T 39600-2021</td>
+              <td class="stdname">人造板及其制品挥发性有机化合物释放量</td>
+              <td class="center"><span class="dash">—</span></td>
+              <td class="center"><span class="dash">—</span></td>
+              <td class="center"><span class="dash">—</span></td>
+              <td class="center"><span class="tag t-info">⚪ 不在库</span></td>
+            </tr>
+            <tr>
+              <td class="stdcode">GB/T 4893.1-2021</td>
+              <td class="stdname">家具表面漆膜理化性能试验 第1部分：耐冷热温差</td>
+              <td class="center"><span class="tag t-success clickable">✓ 5 机构</span></td>
+              <td class="center"><span class="tag t-success clickable">✓ 3</span></td>
+              <td class="center"><span class="tag t-success clickable">✓ 4</span></td>
+              <td class="center"><span class="tag t-success">🟢 在库</span></td>
+            </tr>
+            <tr>
+              <td class="stdcode">QB/T 2280-2016</td>
+              <td class="stdname">办公家具 办公椅</td>
+              <td class="center"><span class="tag t-success clickable">✓ 1 机构</span></td>
+              <td class="center"><span class="dash">—</span></td>
+              <td class="center"><span class="dash">—</span></td>
+              <td class="center"><span class="tag t-primary">🔵 系列在库</span></td>
+            </tr>
+            <tr class="uncovered">
+              <td class="stdcode">GB/T 28202-2020</td>
+              <td class="stdname">家具工业术语</td>
+              <td class="center"><span class="dash">—</span></td>
+              <td class="center"><span class="dash">—</span></td>
+              <td class="center"><span class="dash">—</span></td>
+              <td class="center"><span class="tag t-info">⚪ 不在库</span></td>
+            </tr>
+            <tr>
+              <td class="stdcode">GB 28481-2012</td>
+              <td class="stdname">塑料家具中有害物质限量</td>
+              <td class="center"><span class="tag t-success clickable">✓ 2 机构</span></td>
+              <td class="center"><span class="tag t-success clickable">✓ 1</span></td>
+              <td class="center"><span class="dash">—</span></td>
+              <td class="center"><span class="tag t-warning">🟡 仅引用</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="text-align:right;color:#909399;font-size:12px;margin-top:12px">共 128 条 · 显示 1–8 · 点击带色标签查看命中明细 ▸</div>
+    </div>
+  </div>
+
+  <!-- 命中明细抽屉 -->
+  <div class="drawer-mask"></div>
+  <div class="drawer">
+    <div class="dr-head">
+      <div>
+        <h3>命中明细</h3>
+        <div class="code">GB/T 3325-2024 · 金属家具通用技术条件</div>
+      </div>
+      <div class="dr-close">✕</div>
+    </div>
+    <div class="dr-body">
+      <div class="dr-sec">
+        <div class="dr-sec-title">省级 CMA <span class="cnt">3</span></div>
+        <div class="hit">
+          <div class="lab">浙江省家具产品质量检验中心<span class="labno">证书 152012340012</span></div>
+          <div class="meta"><span><b>检测项目：</b>力学性能 / 表面理化</span><span><b>有效期至：</b>2027-08-14</span></div>
+        </div>
+        <div class="hit">
+          <div class="lab">广东产品质量监督检验研究院<span class="labno">证书 442040561177</span></div>
+          <div class="meta"><span><b>检测项目：</b>结构安全 / 稳定性</span><span><b>有效期至：</b>2028-03-01</span></div>
+        </div>
+        <div class="hit">
+          <div class="lab">上海市质检院家具检测站<span class="labno">证书 310023390845</span></div>
+          <div class="meta"><span><b>检测项目：</b>力学性能</span><span><b>有效期至：</b>2026-11-30</span></div>
+        </div>
+      </div>
+
+      <div class="dr-sec">
+        <div class="dr-sec-title">CNAS <span class="cnt">1</span></div>
+        <div class="hit">
+          <div class="lab">华测检测认证集团<span class="labno">L0312</span></div>
+          <div class="meta"><span><b>检测对象：</b>金属家具</span><span><b>检测参数：</b>力学性能、表面</span></div>
+        </div>
+      </div>
+
+      <div class="dr-sec">
+        <div class="dr-sec-title">国家 CMA <span class="cnt">2</span></div>
+        <div class="hit">
+          <div class="lab">国家家具质量检验检测中心<span class="labno">证书 230020349767</span></div>
+          <div class="meta"><span><b>领域：</b>轻工产品</span><span><b>有效期至：</b>2029-05-20</span></div>
+        </div>
+        <div class="hit">
+          <div class="lab">中国建筑材料科学研究总院<span class="labno">证书 110012007781</span></div>
+          <div class="meta"><span><b>领域：</b>建材轻工</span><span><b>有效期至：</b>2027-12-09</span></div>
+        </div>
+      </div>
+
+      <div class="dr-sec">
+        <div class="dr-sec-title">一单一库</div>
+        <div class="caplib-box">
+          🟢 在库（active）—— 该标准号在能力项目库内，状态有效。
+          <div class="dom">所属领域：轻工 · 标准方法：GB/T 3325-2024</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

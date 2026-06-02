@@ -1,0 +1,37 @@
+# 依赖
+node_modules/
+web/node_modules/
+
+# 构建产物
+dist/
+web/dist/
+
+# 运行时数据（SQLite 库 + WAL/SHM）
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/.server-port
+
+# 凭据（绝不入库）
+.env.local
+
+# 编辑器/系统
+.DS_Store
+*.log
+
+# PoC 调试产物（滑块样本图/标注图/Python 缓存，仅本地保留，不入库）
+# —— PoC 的 .py / .cjs 脚本本身保留入库（记录滑块破解探索过程）
+poc/__pycache__/
+poc/samples/
+poc/ann/
+poc/ann3/
+poc/annd/
+poc/annotated/
+poc/annotated2/
+poc/s2/
+poc/s3/
+poc/*.png
+
+# playwright MCP 下载/快照目录
+.playwright-mcp/
+

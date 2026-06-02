@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>qual-match · 细节预览</title>
+<style>
+  :root{
+    color-scheme:light;
+    --primary:#409eff;--success:#67c23a;--warning:#e6a23c;--danger:#f56c6c;--info:#909399;
+    --border:#e4e7ed;--border-light:#ebeef5;--text-main:#303133;--text-reg:#606266;--text-sec:#909399;
+    --bg-page:#f5f7fa;--aside:#304156;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Helvetica Neue",Helvetica,"PingFang SC","Microsoft YaHei",Arial,sans-serif;background:var(--bg-page);color:var(--text-main);font-size:14px;line-height:1.5}
+
+  /* 顶部视图切换条 */
+  .viewbar{position:sticky;top:0;z-index:50;background:#1f2d3d;color:#fff;display:flex;align-items:center;gap:4px;padding:0 18px;height:50px;box-shadow:0 2px 8px rgba(0,0,0,.15);flex-wrap:wrap}
+  .viewbar .vt{font-size:13px;font-weight:600;margin-right:14px;color:#8896aa}
+  .vtab{padding:6px 14px;border-radius:6px;font-size:13px;cursor:pointer;color:#bfcbd9}
+  .vtab:hover{background:#33455a;color:#fff}
+  .vtab.active{background:var(--primary);color:#fff}
+
+  .view{display:none;padding:22px}
+  .view.show{display:block}
+  .view h2.vtitle{font-size:16px;margin-bottom:4px}
+  .view p.vdesc{color:var(--text-sec);font-size:13px;margin-bottom:18px}
+
+  /* 通用 chrome */
+  .panel{background:#fff;border:1px solid var(--border-light);border-radius:8px;overflow:hidden}
+  .panel + .panel{margin-top:18px}
+  .btn{height:32px;padding:0 14px;border-radius:6px;border:1px solid var(--border);background:#fff;color:var(--text-reg);font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .btn:hover{color:var(--primary);border-color:#c6e2ff;background:#ecf5ff}
+  .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+  .btn.primary:hover{background:#66b1ff;border-color:#66b1ff;color:#fff}
+  .btn.success{background:var(--success);border-color:var(--success);color:#fff}
+  .btn.sm{height:26px;padding:0 10px;font-size:12px}
+  .input{height:32px;border:1px solid var(--border);border-radius:6px;padding:0 12px;font-size:13px;color:var(--text-main);outline:0}
+  .input:focus{border-color:var(--primary)}
+  .tag{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 9px;border-radius:4px;font-size:12px;line-height:1;border:1px solid transparent}
+  .t-success{background:#f0f9eb;color:#67c23a;border-color:#e1f3d8}
+  .t-warning{background:#fdf6ec;color:#e6a23c;border-color:#faecd8}
+  .t-info{background:#f4f4f5;color:#909399;border-color:#e9e9eb}
+  .t-primary{background:#ecf5ff;color:#409eff;border-color:#d9ecff}
+  .t-danger{background:#fef0f0;color:#f56c6c;border-color:#fde2e2}
+  .dash{color:#c0c4cc}
+  table{width:100%;border-collapse:collapse}
+  thead th{background:#fafafa;color:var(--text-main);font-weight:600;font-size:13px;text-align:left;padding:11px 14px;border-bottom:1px solid var(--border-light);white-space:nowrap}
+  thead th.center{text-align:center}
+  tbody td{padding:10px 14px;border-bottom:1px solid var(--border-light);font-size:13px;color:var(--text-reg)}
+  tbody td.center{text-align:center}
+  tbody tr:hover{background:#f5f7fa}
+  .mono{font-family:Consolas,Monaco,monospace}
+  .muted{color:var(--text-sec)}
+
+  /* 综合查询 */
+  .qbar{padding:16px 18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--border-light)}
+  .seg{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+  .seg span{padding:6px 12px;font-size:13px;cursor:pointer;color:var(--text-reg);border-right:1px solid var(--border)}
+  .seg span:last-child{border-right:0}
+  .seg span.on{background:var(--primary);color:#fff}
+  .srcfilter{display:flex;gap:6px}
+  .chip{padding:4px 11px;border:1px solid var(--border);border-radius:14px;font-size:12px;cursor:pointer;color:var(--text-reg)}
+  .chip.on{background:#ecf5ff;border-color:#a3d0ff;color:var(--primary)}
+
+  /* 聚合卡 */
+  .agg{padding:14px 18px;border-bottom:1px solid var(--border-light)}
+  .agg .head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .agg .head .code{font-family:Consolas,monospace;font-weight:600;font-size:14px}
+  .agg .subrow{display:flex;gap:10px;font-size:12px;color:var(--text-reg);padding:5px 0;border-top:1px dashed var(--border-light)}
+  .agg .subrow .who{min-width:200px;font-weight:500;color:var(--text-main)}
+
+  /* 资质管理 */
+  .srctabs{display:flex;border-bottom:1px solid var(--border-light);padding:0 18px;gap:2px}
+  .srctab{padding:13px 18px;font-size:14px;cursor:pointer;color:var(--text-reg);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .srctab.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+  .srctab .b{background:#f0f2f5;border-radius:9px;font-size:11px;padding:1px 7px;margin-left:5px;color:var(--text-sec)}
+  .srcbody{padding:18px}
+  .srcbody .acts{display:flex;gap:10px;margin-bottom:14px}
+  .statedot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .d-ok{background:var(--success)}.d-syncing{background:var(--primary)}.d-err{background:var(--danger)}.d-pending{background:var(--info)}
+
+  /* 设置 */
+  .form-row{display:flex;align-items:center;padding:14px 0;border-bottom:1px solid var(--border-light);gap:20px}
+  .form-row:last-child{border-bottom:0}
+  .form-row .lbl{width:180px;color:var(--text-reg);font-size:13px;text-align:right;flex-shrink:0}
+  .form-row .ctl{flex:1}
+  .switch{width:44px;height:22px;border-radius:11px;background:var(--success);position:relative;display:inline-block;cursor:pointer}
+  .switch::after{content:"";position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:#fff}
+  .switch.off{background:#c0c4cc}
+  .switch.off::after{right:auto;left:2px}
+
+  /* 弹窗演示区 */
+  .stage{position:relative;background:#eef1f5;border:1px solid var(--border-light);border-radius:8px;min-height:360px;display:flex;align-items:center;justify-content:center;padding:28px;overflow:hidden}
+  .dialog{width:560px;background:#fff;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.18)}
+  .dl-head{padding:16px 20px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center}
+  .dl-head h3{font-size:16px}
+  .dl-head .x{color:var(--text-sec);cursor:pointer;font-size:18px}
+  .dl-body{padding:20px}
+  .dl-foot{padding:14px 20px;border-top:1px solid var(--border-light);display:flex;justify-content:flex-end;gap:10px}
+  .uploadbox{border:2px dashed #c6d2e0;border-radius:8px;padding:30px;text-align:center;color:var(--text-sec);background:#fafcff}
+  .uploadbox .big{font-size:38px;color:#c0c4cc;margin-bottom:8px}
+  .uploadbox b{color:var(--primary)}
+  .progress{height:8px;border-radius:4px;background:#ebeef5;overflow:hidden;margin:8px 0}
+  .progress i{display:block;height:100%;background:var(--primary);border-radius:4px}
+  .progress.green i{background:var(--success)}
+  .filerow{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border-light);border-radius:6px;font-size:13px;margin-top:10px}
+  .map-tbl td,.map-tbl th{padding:8px 10px;font-size:13px}
+  .map-tbl select{height:30px;border:1px solid var(--border);border-radius:5px;font-size:13px;padding:0 6px;color:var(--text-main);background:#fff;width:100%}
+
+  /* Excel 导出预览 */
+  .xls{border:1px solid #b7c4d0;border-radius:6px;overflow:auto;background:#fff}
+  .xls table{border-collapse:collapse;min-width:1000px}
+  .xls th,.xls td{border:1px solid #d4dbe2;padding:6px 9px;font-size:12.5px;white-space:nowrap}
+  .xls thead th{background:#217346;color:#fff;font-weight:600;position:sticky;top:0;border-color:#1a5c38}
+  .xls .rownum{background:#f3f5f7;color:#888;text-align:center;font-size:11px;width:34px;border-color:#d4dbe2}
+  .xls tbody tr:nth-child(even){background:#f7faf8}
+  .xls .filterhint{font-size:11px;opacity:.85;font-weight:400}
+  .xls .cov{color:#217346;font-weight:600}
+  .xls .nocov{color:#c0392b;font-weight:600}
+  .tipbox{background:#ecf5ff;border:1px solid #d9ecff;border-radius:6px;padding:10px 14px;font-size:12.5px;color:#3375b9;margin-bottom:14px}
+
+  /* 细节打磨 */
+  .sortable{cursor:pointer;user-select:none}
+  .sortable .arr{font-size:10px;color:#c0c4cc;margin-left:3px}
+  .sortable .arr.act{color:var(--primary)}
+  .skel{background:linear-gradient(90deg,#f0f2f5 25%,#e6e9ee 37%,#f0f2f5 63%);background-size:400% 100%;animation:sk 1.4s ease infinite;border-radius:4px;height:14px}
+  @keyframes sk{0%{background-position:100% 50%}100%{background-position:0 50%}}
+  .empty-state{text-align:center;padding:50px 20px;color:var(--text-sec)}
+  .empty-state .ei{font-size:50px;opacity:.35;margin-bottom:10px}
+  .crossyr{cursor:help;border-bottom:1px dashed #e6a23c}
+  .tooltip{position:relative;display:inline-block}
+  .tooltip .tt{visibility:hidden;position:absolute;bottom:130%;left:50%;transform:translateX(-50%);background:#303133;color:#fff;font-size:12px;padding:6px 10px;border-radius:5px;white-space:nowrap;z-index:5}
+  .tooltip .tt::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#303133}
+  .tooltip:hover .tt{visibility:visible}
+</style>
+</head>
+<body>
+
+<div class="viewbar">
+  <span class="vt">细节预览 ▸</span>
+  <div class="vtab active" data-v="search">综合查询</div>
+  <div class="vtab" data-v="sources">资质管理</div>
+  <div class="vtab" data-v="settings">设置</div>
+  <div class="vtab" data-v="dialogs">交互流程弹窗</div>
+  <div class="vtab" data-v="polish">表格/标签细节</div>
+  <div class="vtab" data-v="export">导出 Excel 预览</div>
+</div>
+
+<!-- ============ 综合查询 ============ -->
+<section class="view show" data-view="search">
+  <h2 class="vtitle">页面 2 · 综合查询</h2>
+  <p class="vdesc">独立于清单的关键词 / 标准号查询。支持「行级列表」与「按标准号聚合」两种视图、源过滤、带年/不带年分流。</p>
+
+  <div class="panel">
+    <div class="qbar">
+      <input class="input" style="width:320px" value="GB/T 3325" placeholder="输入标准号 / 关键词 / 机构名 / 检测项目">
+      <button class="btn primary">🔍 查询</button>
+      <div class="seg"><span class="on">行级列表</span><span>按标准号聚合</span></div>
+      <div class="srcfilter">
+        <span class="chip on">全部</span><span class="chip">省级CMA</span><span class="chip">CNAS</span><span class="chip">国家CMA</span><span class="chip">一单一库</span>
+      </div>
+    </div>
+    <table>
+      <thead><tr>
+        <th style="width:150px">标准号</th><th>标准名称</th><th style="width:90px">资质源</th><th>持有机构 / 领域</th><th>检测项目</th><th style="width:110px">有效期至</th>
+      </tr></thead>
+      <tbody>
+        <tr><td class="mono">GB/T 3325-2024</td><td>金属家具通用技术条件</td><td><span class="tag t-success">省级CMA</span></td><td>浙江省家具产品质量检验中心</td><td>力学性能 / 表面理化</td><td class="mono">2027-08-14</td></tr>
+        <tr><td class="mono">GB/T 3325-2024</td><td>金属家具通用技术条件</td><td><span class="tag t-success">省级CMA</span></td><td>广东产品质量监督检验研究院</td><td>结构安全 / 稳定性</td><td class="mono">2028-03-01</td></tr>
+        <tr><td class="mono">GB/T 3325-2024</td><td>金属家具通用技术条件</td><td><span class="tag t-primary">CNAS</span></td><td>华测检测认证集团 (L0312)</td><td>金属家具 力学性能</td><td class="mono">2026-12-31</td></tr>
+        <tr><td class="mono">GB/T 3325-2024</td><td>金属家具通用技术条件</td><td><span class="tag t-warning">国家CMA</span></td><td>国家家具质量检验检测中心</td><td>轻工产品</td><td class="mono">2029-05-20</td></tr>
+        <tr><td class="mono">GB/T 3325-2013</td><td>金属家具通用技术条件<span class="tag t-danger" style="margin-left:8px">旧版</span></td><td><span class="tag t-success">省级CMA</span></td><td>江苏省质检院</td><td>力学性能</td><td class="mono">2025-09-30</td></tr>
+      </tbody>
+    </table>
+    <div style="padding:12px 18px;text-align:right;font-size:12px;color:var(--text-sec);border-top:1px solid var(--border-light)">
+      命中 24 条 · 输入含年份「-2024」→ 严格保年匹配,2013 版另行标注 · 第 1/3 页 ‹ 1 2 3 ›
+    </div>
+  </div>
+
+  <div class="panel">
+    <div style="padding:12px 18px;border-bottom:1px solid var(--border-light);font-size:13px;color:var(--text-sec)">按标准号聚合视图(切到「按标准号聚合」时)</div>
+    <div class="agg">
+      <div class="head"><span class="code">GB/T 3325-2024</span><span class="muted">金属家具通用技术条件</span>
+        <span class="tag t-success">省级CMA 3</span><span class="tag t-primary">CNAS 1</span><span class="tag t-warning">国家CMA 2</span><span class="tag t-success">🟢 在库</span></div>
+      <div class="subrow"><span class="who">浙江省家具产品质量检验中心</span><span class="muted">省级CMA · 力学性能/表面理化 · 至 2027-08-14</span></div>
+      <div class="subrow"><span class="who">华测检测认证集团</span><span class="muted">CNAS L0312 · 金属家具 · 至 2026-12-31</span></div>
+      <div class="subrow"><span class="who">国家家具质量检验检测中心</span><span class="muted">国家CMA · 轻工产品 · 至 2029-05-20</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 资质管理 ============ -->
+<section class="view" data-view="sources">
+  <h2 class="vtitle">页面 3 · 资质管理</h2>
+  <p class="vdesc">4 类源各一个 Tab。机构型(省级CMA/CNAS/国家CMA)以机构为订阅单位;一单一库以领域为订阅单位。首版主路径是 Excel 导入,抓取接入后可点「同步」。</p>
+
+  <div class="panel">
+    <div class="srctabs">
+      <div class="srctab on">省级 CMA<span class="b">12</span></div>
+      <div class="srctab">CNAS<span class="b">5</span></div>
+      <div class="srctab">国家 CMA<span class="b">3</span></div>
+      <div class="srctab">一单一库<span class="b">11 领域</span></div>
+    </div>
+    <div class="srcbody">
+      <div class="acts">
+        <button class="btn primary">＋ 添加机构</button>
+        <button class="btn">🔍 搜索候选机构</button>
+        <button class="btn success">⬆ 导入 Excel 明细</button>
+      </div>
+      <table>
+        <thead><tr>
+          <th>机构名称</th><th style="width:160px">证书编号</th><th class="center" style="width:90px">资质条数</th><th class="center" style="width:110px">同步状态</th><th style="width:140px">上次同步</th><th style="width:90px">来源</th><th class="center" style="width:130px">操作</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>浙江省家具产品质量检验中心</td><td class="mono">152012340012</td><td class="center">486</td><td class="center"><span class="statedot d-ok"></span>成功</td><td class="mono muted">2026-05-28 14:02</td><td><span class="tag t-info">抓取</span></td><td class="center"><button class="btn sm">同步</button> <button class="btn sm">删除</button></td></tr>
+          <tr><td>广东产品质量监督检验研究院</td><td class="mono">442040561177</td><td class="center">1,203</td><td class="center"><span class="statedot d-syncing"></span>同步中</td><td class="mono muted">进行中…</td><td><span class="tag t-info">抓取</span></td><td class="center"><button class="btn sm">查看进度</button></td></tr>
+          <tr><td>上海市质检院家具检测站</td><td class="mono">310023390845</td><td class="center">312</td><td class="center"><span class="statedot d-ok"></span>成功</td><td class="mono muted">2026-05-20 09:41</td><td><span class="tag t-primary">导入</span></td><td class="center"><button class="btn sm">同步</button> <button class="btn sm">删除</button></td></tr>
+          <tr><td>四川省纤维检验局</td><td class="mono">510038820190</td><td class="center">—</td><td class="center"><span class="statedot d-err"></span>失败</td><td class="mono muted">2026-05-30 16:18</td><td><span class="tag t-info">抓取</span></td><td class="center"><button class="btn sm">重试</button> <button class="btn sm">删除</button></td></tr>
+          <tr><td>山东省产品质量检验研究院</td><td class="mono">370041170023</td><td class="center">0</td><td class="center"><span class="statedot d-pending"></span>待同步</td><td class="mono muted">—</td><td><span class="tag t-info">抓取</span></td><td class="center"><button class="btn sm">同步</button> <button class="btn sm">删除</button></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div style="padding:12px 18px;border-bottom:1px solid var(--border-light);font-size:13px;color:var(--text-sec)">一单一库 Tab(领域型 · 11 个顶层领域订阅)</div>
+    <div class="srcbody" style="padding-top:14px">
+      <table>
+        <thead><tr><th>领域</th><th class="center" style="width:90px">订阅</th><th class="center" style="width:110px">本地 / 远端</th><th style="width:150px">上次同步</th><th class="center" style="width:120px">操作</th></tr></thead>
+        <tbody>
+          <tr><td>轻工</td><td class="center"><span class="switch" style="vertical-align:middle"></span></td><td class="center mono">3,418 / 3,418</td><td class="mono muted">2026-06-01 02:00</td><td class="center"><button class="btn sm">同步</button></td></tr>
+          <tr><td>建材</td><td class="center"><span class="switch" style="vertical-align:middle"></span></td><td class="center mono">5,902 / 5,910</td><td class="mono muted">2026-06-01 02:00</td><td class="center"><button class="btn sm">同步</button></td></tr>
+          <tr><td>食品</td><td class="center"><span class="switch off" style="vertical-align:middle"></span></td><td class="center mono">—</td><td class="mono muted">未订阅</td><td class="center"><button class="btn sm">订阅</button></td></tr>
+          <tr><td>电子电器</td><td class="center"><span class="switch off" style="vertical-align:middle"></span></td><td class="center mono">—</td><td class="mono muted">未订阅</td><td class="center"><button class="btn sm">订阅</button></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 设置 ============ -->
+<section class="view" data-view="settings">
+  <h2 class="vtitle">页面 4 · 设置</h2>
+  <p class="vdesc">全局配置:库路径、各源同步并发、国家 CMA 抓取开关等。无多用户、无登录。</p>
+  <div class="panel" style="padding:8px 24px 16px;max-width:760px">
+    <div class="form-row"><div class="lbl">数据库路径</div><div class="ctl"><span class="mono muted">./data/qual-match.db</span> <button class="btn sm" style="margin-left:8px">打开所在目录</button></div></div>
+    <div class="form-row"><div class="lbl">数据库大小</div><div class="ctl muted">28.6 MB · 资质明细 11,734 行 · 一单一库 9,320 行</div></div>
+    <div class="form-row"><div class="lbl">省级 CMA 同步并发</div><div class="ctl"><input class="input" style="width:80px" value="3"></div></div>
+    <div class="form-row"><div class="lbl">CNAS 页面池并发</div><div class="ctl"><input class="input" style="width:80px" value="3"> <span class="muted" style="font-size:12px;margin-left:8px">playwright 浏览器渲染,建议 ≤ 3</span></div></div>
+    <div class="form-row"><div class="lbl">国家 CMA 抓取</div><div class="ctl"><span class="switch"></span> <span class="muted" style="font-size:12px;margin-left:10px">开启后用滑块过码抓取;关闭则仅 Excel 导入</span></div></div>
+    <div class="form-row"><div class="lbl">国家 CMA 并发</div><div class="ctl"><input class="input" style="width:80px" value="1"> <span class="muted" style="font-size:12px;margin-left:8px">政府站点频控敏感,钉死低并发</span></div></div>
+    <div class="form-row"><div class="lbl">std_code 算法版本</div><div class="ctl"><span class="tag t-info mono">v3</span> <button class="btn sm" style="margin-left:8px">全量重算归一列</button></div></div>
+    <div class="form-row"><div class="lbl"></div><div class="ctl"><button class="btn primary">保存设置</button> <button class="btn">导出全库备份</button></div></div>
+  </div>
+</section>
+
+<!-- ============ 交互流程弹窗 ============ -->
+<section class="view" data-view="dialogs">
+  <h2 class="vtitle">交互流程弹窗</h2>
+  <p class="vdesc">上传 / 导入 / 同步等关键交互的状态预览。下方切换不同弹窗。</p>
+  <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+    <button class="btn primary dlg-pick on" data-d="upload">① 上传 Excel 进度</button>
+    <button class="btn dlg-pick" data-d="import">② 资质明细导入(列映射)</button>
+    <button class="btn dlg-pick" data-d="paste">③ 粘贴标准号</button>
+    <button class="btn dlg-pick" data-d="sync">④ 同步进度</button>
+  </div>
+
+  <div class="stage">
+    <!-- ① 上传 -->
+    <div class="dialog dlg-pane" data-d="upload">
+      <div class="dl-head"><h3>上传标准清单 Excel</h3><span class="x">✕</span></div>
+      <div class="dl-body">
+        <div class="uploadbox"><div class="big">⬆</div>将文件拖到此处,或 <b>点击上传</b><br><span style="font-size:12px">支持 .xlsx / .xls / .csv,首列为标准号</span></div>
+        <div class="filerow"><span>📄</span><span style="flex:1">2026检测能力核查清单.xlsx <span class="muted">· 42 KB</span></span><span class="tag t-success">解析完成</span></div>
+        <div style="margin-top:14px;font-size:13px;color:var(--text-reg)">正在归一化标准号…</div>
+        <div class="progress green"><i style="width:100%"></i></div>
+        <div style="font-size:12px;color:var(--text-sec)">128 行 · 有效 128 · 空号跳过 0 · 已生成保年/剥年归一列</div>
+      </div>
+      <div class="dl-foot"><button class="btn">取消</button><button class="btn primary">导入并匹配</button></div>
+    </div>
+
+    <!-- ② 导入列映射 -->
+    <div class="dialog dlg-pane" data-d="import" style="display:none;width:600px">
+      <div class="dl-head"><h3>导入资质明细 · 列映射</h3><span class="x">✕</span></div>
+      <div class="dl-body">
+        <div style="display:flex;gap:12px;margin-bottom:14px;align-items:center;font-size:13px">
+          <span class="muted">目标源</span><span class="tag t-success">省级 CMA</span>
+          <span class="muted">机构</span><span class="mono">浙江省家具产品质量检验中心 (152012340012)</span>
+        </div>
+        <table class="map-tbl" style="border:1px solid var(--border-light);border-radius:6px">
+          <thead><tr><th style="width:40%">Excel 列</th><th style="width:60%">映射到字段</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">标准编号</td><td><select><option>std_code（标准号）✓ 必填</option></select></td></tr>
+            <tr><td class="mono">标准名称</td><td><select><option>std_name（标准名称）</option></select></td></tr>
+            <tr><td class="mono">检测项目/参数</td><td><select><option>test_param（检测项目）</option></select></td></tr>
+            <tr><td class="mono">有效期</td><td><select><option>expiry_date（有效期至）</option></select></td></tr>
+            <tr><td class="mono">备注</td><td><select><option>— 忽略此列 —</option></select></td></tr>
+          </tbody>
+        </table>
+        <div style="margin-top:12px;font-size:12px;color:var(--text-sec)">预览前 3 行 · 共 486 行 · 入库前统一过 cleanStdCode → 保年 → 剥年 三层归一化</div>
+      </div>
+      <div class="dl-foot"><button class="btn">上一步</button><button class="btn primary">确认导入 486 行</button></div>
+    </div>
+
+    <!-- ③ 粘贴标准号 -->
+    <div class="dialog dlg-pane" data-d="paste" style="display:none">
+      <div class="dl-head"><h3>粘贴标准号</h3><span class="x">✕</span></div>
+      <div class="dl-body">
+        <div style="font-size:13px;color:var(--text-reg);margin-bottom:8px">每行一个标准号,支持带年/不带年:</div>
+        <textarea class="input" style="width:100%;height:130px;padding:10px;resize:none;font-family:Consolas,monospace;line-height:1.7">GB/T 3325-2024
+GB/T 17657-2022
+GB 18580-2017
+GB/T 39600-2021
+GB/T 4893.1-2021</textarea>
+        <div style="font-size:12px;color:var(--text-sec);margin-top:8px">已识别 5 个标准号 · 将创建临时清单并立即匹配</div>
+      </div>
+      <div class="dl-foot"><button class="btn">取消</button><button class="btn primary">匹配</button></div>
+    </div>
+
+    <!-- ④ 同步进度 -->
+    <div class="dialog dlg-pane" data-d="sync" style="display:none">
+      <div class="dl-head"><h3>同步中 · 广东产品质量监督检验研究院</h3><span class="x">✕</span></div>
+      <div class="dl-body">
+        <div style="font-size:13px;color:var(--text-reg);margin-bottom:6px">抓取能力明细…(playwright 页面池)</div>
+        <div class="progress"><i style="width:64%"></i></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-sec)"><span>已抓取 770 / 1,203 行</span><span>64%</span></div>
+        <div style="margin-top:16px;background:#f7f9fc;border:1px solid var(--border-light);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--text-reg);font-family:Consolas,monospace;line-height:1.8">
+          ✓ 建立会话 / 信号量获取<br>
+          ✓ 第 1–7 页解析入库(分块事务 200 行/块)<br>
+          ⟳ 第 8 页抓取中…<br>
+          <span class="muted">串行队列 · setImmediate 让出事件循环,页面不卡</span>
+        </div>
+      </div>
+      <div class="dl-foot"><button class="btn">后台运行</button><button class="btn" style="color:var(--danger)">中止</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 表格/标签细节 ============ -->
+<section class="view" data-view="polish">
+  <h2 class="vtitle">表格 / 标签细节态</h2>
+  <p class="vdesc">清单匹配页的细节交互:列排序箭头、悬停 tooltip、跨年提示徽章、空状态、加载骨架屏。</p>
+
+  <div class="panel">
+    <div style="padding:10px 16px;font-size:13px;color:var(--text-sec);border-bottom:1px solid var(--border-light)">① 可排序表头 + 跨年提示 + 悬停 tooltip</div>
+    <table>
+      <thead><tr>
+        <th class="sortable" style="width:170px">标准号 <span class="arr">↕</span></th>
+        <th>标准名称</th>
+        <th class="center sortable" style="width:120px">覆盖类数 <span class="arr act">↓</span></th>
+        <th class="center" style="width:120px">省级 CMA</th>
+        <th class="center" style="width:120px">一单一库</th>
+      </tr></thead>
+      <tbody>
+        <tr><td class="mono">GB/T 4893.1-2021</td><td>家具表面漆膜理化性能试验 第1部分</td><td class="center"><b>4</b></td>
+          <td class="center"><span class="tooltip"><span class="tag t-success" style="cursor:help">✓ 5 机构</span><span class="tt">华测 / 浙江质检 / 广东质检 …点击看全部</span></span></td>
+          <td class="center"><span class="tag t-success">🟢 在库</span></td></tr>
+        <tr><td class="mono">GB/T 3325-2024</td><td>金属家具通用技术条件</td><td class="center"><b>4</b></td>
+          <td class="center"><span class="tag t-success">✓ 3 机构</span></td>
+          <td class="center"><span class="tag t-success">🟢 在库</span></td></tr>
+        <tr style="background:#fdf6ec"><td class="mono">GB/T 39600-2024</td>
+          <td>人造板及其制品挥发性有机化合物释放量
+            <span class="tooltip"><span class="tag t-warning crossyr" style="margin-left:6px;cursor:help">⚠ 跨年</span><span class="tt">保年未命中;库中有 2021 版资质 → 系列有覆盖,非同版</span></span></td>
+          <td class="center"><b>1</b></td>
+          <td class="center"><span class="dash">—</span></td>
+          <td class="center"><span class="tag t-primary">🔵 系列在库</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <div style="padding:10px 16px;font-size:13px;color:var(--text-sec);border-bottom:1px solid var(--border-light)">② 加载骨架屏(匹配计算中)</div>
+    <table>
+      <thead><tr><th style="width:170px">标准号</th><th>标准名称</th><th class="center" style="width:120px">省级 CMA</th><th class="center" style="width:120px">CNAS</th><th class="center" style="width:120px">一单一库</th></tr></thead>
+      <tbody>
+        <tr><td><div class="skel" style="width:120px"></div></td><td><div class="skel" style="width:80%"></div></td><td class="center"><div class="skel" style="width:60px;margin:0 auto"></div></td><td class="center"><div class="skel" style="width:50px;margin:0 auto"></div></td><td class="center"><div class="skel" style="width:60px;margin:0 auto"></div></td></tr>
+        <tr><td><div class="skel" style="width:140px"></div></td><td><div class="skel" style="width:65%"></div></td><td class="center"><div class="skel" style="width:60px;margin:0 auto"></div></td><td class="center"><div class="skel" style="width:50px;margin:0 auto"></div></td><td class="center"><div class="skel" style="width:60px;margin:0 auto"></div></td></tr>
+        <tr><td><div class="skel" style="width:110px"></div></td><td><div class="skel" style="width:75%"></div></td><td class="center"><div class="skel" style="width:60px;margin:0 auto"></div></td><td class="center"><div class="skel" style="width:50px;margin:0 auto"></div></td><td class="center"><div class="skel" style="width:60px;margin:0 auto"></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <div style="padding:10px 16px;font-size:13px;color:var(--text-sec);border-bottom:1px solid var(--border-light)">③ 空状态(尚未导入清单)</div>
+    <div class="empty-state"><div class="ei">📋</div><div style="font-size:15px;color:var(--text-reg);margin-bottom:6px">还没有标准清单</div><div style="margin-bottom:16px">上传一份 Excel,或直接粘贴标准号开始匹配</div><button class="btn primary">⬆ 上传 Excel</button> <button class="btn">📝 粘贴标准号</button></div>
+  </div>
+
+  <div class="panel">
+    <div style="padding:10px 16px;font-size:13px;color:var(--text-sec);border-bottom:1px solid var(--border-light)">④ 一单一库 5 档状态标签色板(单一真相源)</div>
+    <div style="padding:16px;display:flex;gap:14px;flex-wrap:wrap">
+      <span class="tag t-success">🟢 在库 active</span>
+      <span class="tag t-warning">🟡 仅引用 cite_only</span>
+      <span class="tag t-danger">🔴 已废止 abolished</span>
+      <span class="tag t-primary">🔵 系列在库 series_only</span>
+      <span class="tag t-info">⚪ 不在库 not_in_lib</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 导出 Excel 预览 ============ -->
+<section class="view" data-view="export">
+  <h2 class="vtitle">导出匹配结果 · Excel 预览</h2>
+  <p class="vdesc">DESIGN.md 4.3:每行一个标准号,列含 4 类资质覆盖机构 + 一单一库状态 + 是否覆盖。首行 autofilter、列宽按中文 2 宽自适应、状态列带文字前缀。下方为真实样例的网格预览。</p>
+  <div class="tipbox">📎 配套生成了真实数据文件 <b>match-export-sample.csv</b>(Excel 可直接打开),与下方网格内容一致。运行环境恢复后可一键生成带 autofilter/列宽的 .xlsx。</div>
+  <div class="xls">
+    <table>
+      <thead>
+        <tr>
+          <th class="rownum"></th>
+          <th>标准号 <span class="filterhint">▼</span></th>
+          <th>标准名称 <span class="filterhint">▼</span></th>
+          <th>省级CMA覆盖机构 <span class="filterhint">▼</span></th>
+          <th>CNAS覆盖机构 <span class="filterhint">▼</span></th>
+          <th>国家CMA覆盖机构 <span class="filterhint">▼</span></th>
+          <th>一单一库状态 <span class="filterhint">▼</span></th>
+          <th>是否覆盖 <span class="filterhint">▼</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="rownum">1</td><td>GB/T 3325-2024</td><td>金属家具通用技术条件</td><td>浙江省家具检验中心；广东省质检院；上海市质检院</td><td>华测检测(L0312)</td><td>国家家具质检中心；中国建材总院</td><td>🟢 在库</td><td class="cov">✓ 已覆盖</td></tr>
+        <tr><td class="rownum">2</td><td>GB/T 17657-2022</td><td>人造板及饰面人造板理化性能试验方法</td><td>浙江省家具检验中心；山东省质检院</td><td></td><td>国家家具质检中心</td><td>🟢 在库</td><td class="cov">✓ 已覆盖</td></tr>
+        <tr><td class="rownum">3</td><td>GB 18580-2017</td><td>室内装饰装修材料 人造板甲醛释放限量</td><td></td><td>华测检测；广电计量</td><td></td><td>🟡 仅引用</td><td class="cov">✓ 已覆盖</td></tr>
+        <tr><td class="rownum">4</td><td>GB/T 39600-2021</td><td>人造板及其制品挥发性有机化合物释放量</td><td></td><td></td><td></td><td>⚪ 不在库</td><td class="nocov">✗ 未覆盖</td></tr>
+        <tr><td class="rownum">5</td><td>GB/T 4893.1-2021</td><td>家具表面漆膜理化性能试验 第1部分：耐冷热温差</td><td>浙江；广东；上海；江苏；山东(5家)</td><td>华测；广电；CTI</td><td>国家家具质检中心；建材总院；轻工检测院；纺织检测中心</td><td>🟢 在库</td><td class="cov">✓ 已覆盖</td></tr>
+        <tr><td class="rownum">6</td><td>QB/T 2280-2016</td><td>办公家具 办公椅</td><td>浙江省家具检验中心</td><td></td><td></td><td>🔵 系列在库</td><td class="cov">✓ 已覆盖</td></tr>
+        <tr><td class="rownum">7</td><td>GB/T 28202-2020</td><td>家具工业术语</td><td></td><td></td><td></td><td>⚪ 不在库</td><td class="nocov">✗ 未覆盖</td></tr>
+        <tr><td class="rownum">8</td><td>GB 28481-2012</td><td>塑料家具中有害物质限量</td><td>广东省质检院；山东省质检院</td><td>华测检测</td><td></td><td>🟡 仅引用</td><td class="cov">✓ 已覆盖</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div style="font-size:12px;color:var(--text-sec);margin-top:12px">共 128 行 · 已覆盖 97 · 未覆盖 31 · 覆盖率 76% · 文件名 <span class="mono">2026检测能力核查清单_匹配结果_20260602.xlsx</span></div>
+</section>
+
+<script>
+  // 顶部视图切换
+  document.querySelectorAll('.vtab').forEach(t=>t.addEventListener('click',()=>{
+    document.querySelectorAll('.vtab').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    const v=t.dataset.v;
+    document.querySelectorAll('.view').forEach(s=>s.classList.toggle('show',s.dataset.view===v));
+    window.scrollTo(0,0);
+  }));
+  // 弹窗切换
+  document.querySelectorAll('.dlg-pick').forEach(b=>b.addEventListener('click',()=>{
+    document.querySelectorAll('.dlg-pick').forEach(x=>{x.classList.remove('primary','on')});
+    b.classList.add('primary','on');
+    const d=b.dataset.d;
+    document.querySelectorAll('.dlg-pane').forEach(p=>p.style.display=(p.dataset.d===d?'block':'none'));
+  }));
+  // 资质源 tab / 视图切换(纯展示)
+  document.querySelectorAll('.srctab').forEach(t=>t.addEventListener('click',()=>{
+    t.parentElement.querySelectorAll('.srctab').forEach(x=>x.classList.remove('on'));t.classList.add('on');
+  }));
+  document.querySelectorAll('.seg span,.chip').forEach(s=>s.addEventListener('click',()=>{
+    if(s.parentElement.classList.contains('seg')){s.parentElement.querySelectorAll('span').forEach(x=>x.classList.remove('on'));s.classList.add('on');}
+    else{s.parentElement.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));s.classList.add('on');}
+  }));
+</script>
+</body>
+</html>
