@@ -2,7 +2,7 @@
 
 > **下次继续开发先读这份。** 它让你（或新的开发会话）快速恢复上下文、跑起项目、接着干。
 > 单一真相源是 [`DESIGN.md`](DESIGN.md)（完整设计 6 节）；本文件是「当前到哪了 + 怎么接着走」。
-> 最后更新：2026-06-02（阶段 1 完成）。
+> 最后更新：2026-06-04（阶段 4 代码完成，省级 CMA 已联网验证；CNAS 待补联网验证）。
 
 ---
 
@@ -24,9 +24,9 @@
 |------|------|------|
 | 0 脚手架 | ✅ 完成 | 前后端骨架 + shared 共享层 + 12 表建库 + health |
 | 1 主链路 | ✅ 完成 | 导入资质/清单 → 匹配 → 导出，**已可用** |
-| **2 综合查询** | ⏭ **下一步** | 独立于清单，对本地资质库做关键词/标准号查询 |
-| 3 一单一库同步 | 待做 | 移植 bzxz cap-lib（最低风险抓取源）+ 5 档比对状态 |
-| 4 省级CMA+CNAS抓取 | 待做 | 移植 bzxz cma-scraper / cnas-scraper |
+| 2 综合查询 | ✅ 完成 | 独立于清单，对本地资质库做关键词/标准号查询（行级+聚合双视图、源过滤、导出） |
+| 3 一单一库同步 | ✅ 完成 | 移植 bzxz cap-lib，领域订阅+同步（hash diff+soft delete）+ 匹配引擎 5 档比对。**MVP 闭环** |
+| **4 省级CMA+CNAS抓取** | 🟡 代码完成 | 省级CMA(HTTP) **已联网验证28110条入库+匹配命中**；CNAS(playwright) 代码就绪，**待明天补联网验证** |
 | 5 国家CMA | 待做 | 滑块破解**已止损**→走 Excel 导入降级（见 DESIGN §3.5 / poc/） |
 | 6 打磨 | 待做 | 设置页、错误提示、部署说明 |
 
@@ -64,6 +64,8 @@ src/                        后端（CommonJS，tsx 跑 / tsc 编译）
 ├── shared/                 共享层（多数从 bzxz 零改移植）
 │   ├── std-code.ts         ★ 三层归一化地基 cleanStdCode/extractFullCode/extractBaseCode
 │   ├── constants.ts        ★ SELF_ORG_ID + ORG_SOURCES + ORG_SOURCE_TABLE（源→表名映射）
+│   ├── cap-lib-status.ts   一单一库 remark 解析 + 5 档 DiffStatus + parseLibStatus
+│   ├── cap-lib-domains.ts  一单一库 11 顶层领域常量（与 db.ts CAP_LIB_DOMAIN_INIT 手动同步）
 │   ├── response.ts         Result 壳 ok/err/respond/respondError
 │   ├── errors.ts           AppError + 子类 + normalizeError
 │   ├── case.ts             toCamelCase/toSnakeCase
@@ -75,19 +77,39 @@ src/                        后端（CommonJS，tsx 跑 / tsc 编译）
 │   ├── import-service.ts   parseExcelBuffer + importWatchlist + importQualifications
 │   ├── match-service.ts    ★ matchWatchlist 批量IN查询，保年优先剥年兜底
 │   ├── match-service.test.ts
-│   └── export-service.ts   exportMatchResult → xlsx buffer
+│   ├── qualification-service.ts ★ 综合查询：searchQualifications(行级)/searchByStandard(聚合)，带年/不带年分流
+│   ├── qualification-service.test.ts
+│   ├── cap-lib-service.ts   ★ 一单一库：startSync/runSync(RuoYi分页+hash diff+soft delete)/batchStatus(5档)
+│   ├── cap-lib-service.test.ts
+│   ├── sync-progress.ts     ★ 公共进度 store + 串行队列 + makeJobId（cap-lib / scrape 共用）
+│   ├── scrape-service.ts    ★ 抓取入库编排：startProvCmaSync/startCnasSync/searchProvCmaLabs/listCnasPresets
+│   ├── scrape-service.test.ts  抓取器解析单测（CMA cheerio / CNAS parseUrl，不打网络）
+│   └── export-service.ts   exportMatchResult + exportQualificationSearch → xlsx buffer
+├── sources/                 抓取器（阶段 4，从 bzxz 移植）
+│   ├── prov-cma/cma-scraper.ts  省级CMA HTTP+cheerio（search/scrapeFull，删 checkForUpdate）
+│   ├── cnas/cnas-scraper.ts     CNAS playwright+JSL反爬（fetchCapabilities/parseUrl，自带chromium）
+│   └── cnas/preset-cnas-labs.ts 内置 1 机构 L0290（本机构）
 ├── api/
 │   ├── app.ts              Express 装配 + 全局错误中间件（4参!）+ SPA fallback + multer错误
 │   ├── health-routes.ts    GET /api/health
 │   ├── watchlist-routes.ts 清单：创建/列表/详情/删除/match/export
-│   └── import-routes.ts    POST /api/import/qualifications
+│   ├── qualification-routes.ts 综合查询：GET search / by-standard，POST export
+│   ├── import-routes.ts    POST /api/import/qualifications
+│   ├── cap-lib-routes.ts   一单一库：GET domains / PUT subscribe / POST sync / GET sync-progress / POST cleanup
+│   └── source-routes.ts    抓取：prov_cma/search·sync、cnas/presets·sync、sync-progress、:source/orgs（去auth）
 └── index.ts                启动入口
 
 web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
-├── api/client.ts           ★ fetch 封装解 Result 壳 + apiDownload
-├── api/watchlist.ts        类型(MatchResult等) + API 函数
-├── pages/MatchPage.vue     ★ 清单匹配主页（已实做）
-├── pages/PlaceholderPage.vue  综合查询/资质管理/设置占位（阶段2/3起替换）
+├── api/client.ts           ★ fetch 封装解 Result 壳 + apiPut + apiDownload（支持可选 body）
+├── api/watchlist.ts        类型(MatchResult含capLib) + API 函数
+├── api/qualification.ts    类型(QualSearchRow/QualStandardGroup) + 综合查询 API + SOURCE_LABEL
+├── api/cap-lib.ts          类型(DomainMeta/SyncProgress/CapLibStatus) + 一单一库 API
+├── api/sources.ts          类型(ProvCmaSearchResult/CnasPreset) + 省级CMA/CNAS 抓取 API
+├── pages/MatchPage.vue     ★ 清单匹配主页（已实做，含一单一库第5列）
+├── pages/SearchPage.vue    ★ 综合查询主页（已实做，行级+聚合双视图）
+├── pages/SourcesPage.vue   ★ 资质管理（一单一库 + 省级CMA + CNAS tab 实做；国家CMA 占位）
+├── pages/PlaceholderPage.vue  设置占位（阶段6 替换）
+├── components/CoverageTag.vue / CapLibStatusTag.vue（5档色板）/ SyncProgress.vue / QualImportDialog.vue
 ├── components/CoverageTag.vue / QualImportDialog.vue
 ├── App.vue / router.ts / main.ts
 ```
@@ -114,21 +136,47 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
 
 ---
 
-## 六、下一步：阶段 2 综合查询
+## 六、下一步：补 CNAS 联网验证 → 阶段 5/6
 
-**目标**（DESIGN §4.2）：独立于清单，直接对本地资质库做关键词/标准号查询。
+### 阶段 4 当前状态（2026-06-04）
 
-**要做**：
-- 新写 `src/services/qualification-service.ts`：
-  - 行级搜索：关键词命中标准号/标准名/检测项目，跨 3 个机构型源 UNION，分页
-  - 按标准号聚合：同号下全部资质行聚合成一组
-  - 带年/不带年分流：输入带 4 位年份 → 严格保年；不带年 → 保年+剥年双路径
-  - 源过滤：可只查某一类
-- 新写 `src/api/qualification-routes.ts`：`GET /api/qualifications/search`、`by-standard`，挂进 app.ts
-- 前端：把 `pages/PlaceholderPage`（/search 路由）换成实做的 `SearchPage.vue`
-- 参照 bzxz `searchQualifications` / `searchByStandard`（在 bzxz src/services 下）
+**代码已全部完成并通过类型检查 + 47 个单测**。省级 CMA 已联网验证；CNAS 因 chromium
+安装未完成而**未跑联网验证**，是明天唯一的收尾项。
 
-**注意**：阶段 2 仍只查 3 个机构型源（一单一库 cap_lib 是空表，阶段 3 才同步）。
+已落地的文件：
+- `src/services/sync-progress.ts`（新）—— 公共进度 store + 串行队列 + makeJobId，cap-lib 与
+  scrape 共用（阶段 3 的 cap-lib-service 已重构为复用它；进度对象字段 domain→target）。
+- `src/sources/prov-cma/cma-scraper.ts`（移植 bzxz，删 checkForUpdate，HTTP+cheerio）。
+- `src/sources/cnas/cnas-scraper.ts`（移植 bzxz，去 channel:'chrome' 用自带 chromium，删
+  checkForUpdate/fetchLabInfo）+ `src/sources/cnas/preset-cnas-labs.ts`（内置 1 机构 L0290=本机构）。
+- `src/services/scrape-service.ts`（新）—— startProvCmaSync / startCnasSync / searchProvCmaLabs /
+  listCnasPresets / closeScrapers，抓取→三层归一化→replace 入库（机构列 SELF_ORG_ID）→labs 占位行。
+- `src/api/source-routes.ts`（新，去 auth）+ 挂进 app.ts，shutdown 调 closeScrapers。
+- 前端 `web/src/api/sources.ts` + `SourcesPage.vue` 的省级CMA/CNAS 两 tab 实做（搜索/抓取/进度）。
+- `src/services/scrape-service.test.ts`（解析逻辑单测：CMA cheerio 选择器 + CNAS parseUrl）。
+
+**省级 CMA 联网验证已通过**：搜「湖北省产品质量监督检验研究院」→ 抓取 publicDetailId
+`LI201581410348LI5860` → **28110 条全部入库**（三层归一列齐全、labs data_origin=scraped）→
+用抓来的 `GB 5009.86-2025` 建清单匹配 → `provCma.covered=true, matched=true`。✅
+
+### 明天第一件事：补 CNAS 联网验证
+
+1. **装 chromium**（昨晚下载被中断）：`npx playwright install chromium`（几百 MB，耐心等完）。
+2. 起后端 `npm run dev`，调 `POST /api/sources/cnas/sync` body `{"labNo":"L0290"}` → 拿 jobId
+   → 轮询 `GET /api/sources/sync-progress/:jobId` 到 done（**CNAS 有 JSL 反爬，每页间隔 1.5~3.5s +
+   每 8 页重导航，机构大时可能数分钟**，正常）。
+3. 查 `cnas_qualifications` 本机构（cert/lab 列 `_self`）条数 > 0、归一列齐全；用一个抓来的标准号
+   建清单匹配确认 `cnas.covered=true`。
+4. ⚠️ CNAS 受反爬节流可能慢/偶发失败（`CNAS anti-bot challenge not resolved`）；多试一次即可。
+   若始终失败，记录现象 —— **抓取后置策略：不阻塞产品，仍可 Excel 导入**（阶段 1 路径）。
+5. CNAS 验证通过后：把本节状态改「阶段 4 ✅ 完成」，README/DESIGN 同步，下一步转**阶段 6 打磨**
+   （阶段 5 国家 CMA 滑块已止损，走导入降级，非必须）。
+
+> 端口残留：tsx 在 Windows 杀不净，重启前清 3000（见第三节）。playwright 还会留 chrome 进程，
+> 验证后 `taskkill //F //IM chrome.exe`。
+
+**复用提示**：抓取器实例在 scrape-service 模块单例持有；进度/串行用公共 sync-progress；
+入库 replace 语义与 import-service 一致（都按 SELF_ORG_ID 清旧行）。
 
 ---
 

@@ -5,6 +5,10 @@ import { getDb } from '../services/db';
 import { createHealthRoutes } from './health-routes';
 import { createWatchlistRoutes } from './watchlist-routes';
 import { createImportRoutes } from './import-routes';
+import { createQualificationRoutes } from './qualification-routes';
+import { createCapLibRoutes } from './cap-lib-routes';
+import { createSourceRoutes } from './source-routes';
+import { closeScrapers } from '../services/scrape-service';
 import { AppError } from '../shared/errors';
 import { respondError } from '../shared/response';
 import { getRootDir } from '../shared/fs';
@@ -16,11 +20,13 @@ export interface QualMatchApp extends Express {
 /**
  * 装配 Express app。
  *   - express.json
- *   - 业务路由：health / watchlist（清单导入·匹配·导出）/ import（资质明细导入）
+ *   - 业务路由：health / watchlist（清单导入·匹配·导出）/ import（资质明细导入）/
+ *     qualification（综合查询：行级搜索·按标准号聚合·导出）/ cap-lib（一单一库：领域订阅·同步·清理）/
+ *     source（省级CMA·CNAS 在线抓取）
  *   - 生产期静态托管 web/dist + SPA fallback（开发期前端走 Vite dev server，不在此托管）
  *   - 全局错误中间件（最后挂，4 参签名）
  *
- * 后续阶段挂入：qualification（综合查询）/ cap-lib / sources（抓取同步）。
+ * 后续阶段挂入：国家 CMA（阶段 5，滑块已止损走导入降级）。
  */
 export function createApp(): QualMatchApp {
   const app = express() as QualMatchApp;
@@ -34,6 +40,9 @@ export function createApp(): QualMatchApp {
   app.use(createHealthRoutes());
   app.use(createWatchlistRoutes(db));
   app.use(createImportRoutes(db));
+  app.use(createQualificationRoutes(db));
+  app.use(createCapLibRoutes(db));
+  app.use(createSourceRoutes(db));
 
   // ── 生产期静态托管前端构建产物 ──
   // 开发期前端由 Vite dev server（5173）提供，/api 经 Vite proxy 转发到本服务，
@@ -74,6 +83,7 @@ export function createApp(): QualMatchApp {
   });
 
   app.shutdown = () => {
+    try { void closeScrapers(); } catch { /* ignore */ }
     try { db.close(); } catch { /* ignore */ }
   };
 

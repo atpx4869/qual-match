@@ -1,14 +1,15 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 import MatchPage from '@/pages/MatchPage.vue';
+import SearchPage from '@/pages/SearchPage.vue';
+import SourcesPage from '@/pages/SourcesPage.vue';
 import PlaceholderPage from '@/pages/PlaceholderPage.vue';
 
-// 阶段 0：仅清单匹配页有实体内容（含 health 连通性测试），其余三页为占位，
-// 后续阶段（综合查询 / 资质管理 / 设置）逐步实现。
+// 阶段 0/1：清单匹配；阶段 2：综合查询；阶段 3：资质管理（一单一库 tab 实做）。设置仍占位。
 const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/match' },
   { path: '/match', name: 'match', component: MatchPage, meta: { title: '清单匹配' } },
-  { path: '/search', name: 'search', component: PlaceholderPage, meta: { title: '综合查询' } },
-  { path: '/sources', name: 'sources', component: PlaceholderPage, meta: { title: '资质管理' } },
+  { path: '/search', name: 'search', component: SearchPage, meta: { title: '综合查询' } },
+  { path: '/sources', name: 'sources', component: SourcesPage, meta: { title: '资质管理' } },
   { path: '/settings', name: 'settings', component: PlaceholderPage, meta: { title: '设置' } },
 ];
 

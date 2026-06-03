@@ -9,6 +9,7 @@ import {
   type WatchlistSummary, type MatchOutcome, type MatchResult,
 } from '@/api/watchlist';
 import CoverageTag from '@/components/CoverageTag.vue';
+import CapLibStatusTag from '@/components/CapLibStatusTag.vue';
 import QualImportDialog from '@/components/QualImportDialog.vue';
 
 const watchlists = ref<WatchlistSummary[]>([]);
@@ -170,6 +171,9 @@ onMounted(refreshWatchlists);
         </el-table-column>
         <el-table-column label="国家CMA" width="130" align="center">
           <template #default="{ row }"><CoverageTag :coverage="row.natCma" /></template>
+        </el-table-column>
+        <el-table-column label="一单一库" width="130" align="center">
+          <template #default="{ row }"><CapLibStatusTag :cap-lib="row.capLib" /></template>
         </el-table-column>
         <el-table-column label="是否覆盖" width="100" align="center">
           <template #default="{ row }">

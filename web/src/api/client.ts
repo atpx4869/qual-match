@@ -53,15 +53,30 @@ export async function apiDelete<T>(url: string): Promise<T> {
   return unwrap<T>(resp);
 }
 
+/** PUT JSON，返回解包后的 data。 */
+export async function apiPut<T>(url: string, body?: unknown): Promise<T> {
+  const resp = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return unwrap<T>(resp);
+}
+
 /** POST FormData（文件上传），返回解包后的 data。 */
 export async function apiUpload<T>(url: string, form: FormData): Promise<T> {
   const resp = await fetch(url, { method: 'POST', body: form });
   return unwrap<T>(resp);
 }
 
-/** POST 触发下载（导出 Excel）。不解 Result 壳，直接拿 blob 触发浏览器下载。 */
-export async function apiDownload(url: string): Promise<void> {
-  const resp = await fetch(url, { method: 'POST' });
+/** POST 触发下载（导出 Excel）。不解 Result 壳，直接拿 blob 触发浏览器下载。
+ *  可选 body：综合查询导出需要传 { q, sources } 等查询条件（JSON）。 */
+export async function apiDownload(url: string, body?: unknown): Promise<void> {
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
   if (!resp.ok) {
     // 错误时后端返回 Result 壳 JSON
     try {

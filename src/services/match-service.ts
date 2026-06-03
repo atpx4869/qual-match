@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { ORG_SOURCES, ORG_SOURCE_TABLE, type OrgSource } from '../shared/constants';
 import { NotFoundError } from '../shared/errors';
+import { CapLibService, type CapLibStatus } from './cap-lib-service';
 
 /**
  * 匹配引擎（阶段 1，单一机构）。
@@ -31,8 +32,9 @@ export interface MatchResult {
   provCma: SourceCoverage;
   cnas: SourceCoverage;
   natCma: SourceCoverage;
-  coveredBy: OrgSource[];    // 被哪几类覆盖（保年）
-  matched: boolean;          // 是否至少被一类覆盖
+  capLib: CapLibStatus;      // 一单一库 5 档状态（政策范围，独立维度，不计入 matched）
+  coveredBy: OrgSource[];    // 被哪几类机构源覆盖（保年）
+  matched: boolean;          // 是否至少被一类机构源覆盖（cap_lib「在库」不算本机构有资质）
 }
 
 interface QualRow {
@@ -109,9 +111,13 @@ export function matchWatchlist(db: Database.Database, watchlistId: number): Matc
   const norms = [...new Set(items.map((i) => i.std_code_norm).filter(Boolean))];
   const bases = [...new Set(items.map((i) => i.std_code_base).filter(Boolean))];
 
-  // 一次性查全部源
+  // 一次性查全部机构源
   const perSource = {} as Record<OrgSource, { byNorm: Map<string, QualRow[]>; byBase: Map<string, QualRow[]> }>;
   for (const s of ORG_SOURCES) perSource[s] = queryBySource(db, s, norms, bases);
+
+  // 一单一库 5 档状态（批量；按清单原始号查，batchStatus 内部归一化）
+  const capLibSvc = new CapLibService(db);
+  const capLibMap = capLibSvc.batchStatus(items.map((i) => i.std_code));
 
   const results: MatchResult[] = [];
   let coveredCount = 0;
@@ -120,6 +126,9 @@ export function matchWatchlist(db: Database.Database, watchlistId: number): Matc
     const provCma = buildCoverage(it.std_code_norm, it.std_code_base, perSource.prov_cma.byNorm, perSource.prov_cma.byBase);
     const cnas = buildCoverage(it.std_code_norm, it.std_code_base, perSource.cnas.byNorm, perSource.cnas.byBase);
     const natCma = buildCoverage(it.std_code_norm, it.std_code_base, perSource.nat_cma.byNorm, perSource.nat_cma.byBase);
+    const capLib = capLibMap[it.std_code] ?? {
+      status: 'not_in_lib', inLib: false, libDomain: '', libStatus: '', libRemark: '', seriesNewCode: '', stale: true,
+    };
 
     const coveredBy: OrgSource[] = [];
     if (provCma.covered) coveredBy.push('prov_cma');
@@ -128,7 +137,7 @@ export function matchWatchlist(db: Database.Database, watchlistId: number): Matc
     const matched = coveredBy.length > 0;
     if (matched) coveredCount++;
 
-    results.push({ stdCode: it.std_code, stdName: it.std_name, provCma, cnas, natCma, coveredBy, matched });
+    results.push({ stdCode: it.std_code, stdName: it.std_name, provCma, cnas, natCma, capLib, coveredBy, matched });
   }
 
   // 记录本次匹配时间

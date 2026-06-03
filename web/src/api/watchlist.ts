@@ -1,4 +1,5 @@
 import { apiGet, apiPost, apiDelete, apiUpload, apiDownload } from './client';
+import type { CapLibStatus } from './cap-lib';
 
 // ─── 类型（与后端 match-service / import-service 对齐，camelCase）──────────────
 
@@ -31,6 +32,7 @@ export interface MatchResult {
   provCma: SourceCoverage;
   cnas: SourceCoverage;
   natCma: SourceCoverage;
+  capLib: CapLibStatus;
   coveredBy: OrgSource[];
   matched: boolean;
 }
