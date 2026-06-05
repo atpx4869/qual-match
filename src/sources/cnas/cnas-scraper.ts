@@ -11,6 +11,9 @@ import type { Browser, Page } from 'playwright';
  *   - launch 去掉 channel:'chrome'，用 playwright 自带 chromium（首次需 npx playwright install chromium）。
  *   - 删 checkForUpdate / fetchLabInfo（查新，单用户不需要）。
  *   - 无验证码、不依赖 captcha-ocr。
+ *
+ * 浏览器退路：若设了环境变量 CNAS_CHROME_PATH，则用它作 executablePath（指向现成
+ * chrome / chrome-headless-shell），免去 playwright 下载匹配版本浏览器。用于下载受限的环境。
  */
 
 const CNAS_BASE = 'https://las.cnas.org.cn/LAS/publish';
@@ -89,8 +92,10 @@ export class CnasScraper {
     if (!this.browserLaunch) {
       this.browserLaunch = (async () => {
         const pw = await import('playwright');
+        const chromePath = process.env.CNAS_CHROME_PATH?.trim();
         const b = await pw.chromium.launch({
           headless: true,
+          ...(chromePath ? { executablePath: chromePath } : {}),
           args: ['--disable-blink-features=AutomationControlled'],
         });
         b.on('disconnected', () => { this.browser = null; this.browserLaunch = null; });

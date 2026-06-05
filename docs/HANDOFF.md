@@ -2,7 +2,7 @@
 
 > **下次继续开发先读这份。** 它让你（或新的开发会话）快速恢复上下文、跑起项目、接着干。
 > 单一真相源是 [`DESIGN.md`](DESIGN.md)（完整设计 6 节）；本文件是「当前到哪了 + 怎么接着走」。
-> 最后更新：2026-06-04（阶段 4 代码完成，省级 CMA 已联网验证；CNAS 待补联网验证）。
+> 最后更新：2026-06-05（阶段 4 ✅ 完成 —— 省级 CMA 与 CNAS 均已联网验证入库+匹配命中）。
 
 ---
 
@@ -26,7 +26,7 @@
 | 1 主链路 | ✅ 完成 | 导入资质/清单 → 匹配 → 导出，**已可用** |
 | 2 综合查询 | ✅ 完成 | 独立于清单，对本地资质库做关键词/标准号查询（行级+聚合双视图、源过滤、导出） |
 | 3 一单一库同步 | ✅ 完成 | 移植 bzxz cap-lib，领域订阅+同步（hash diff+soft delete）+ 匹配引擎 5 档比对。**MVP 闭环** |
-| **4 省级CMA+CNAS抓取** | 🟡 代码完成 | 省级CMA(HTTP) **已联网验证28110条入库+匹配命中**；CNAS(playwright) 代码就绪，**待明天补联网验证** |
+| **4 省级CMA+CNAS抓取** | ✅ 完成 | 省级CMA(HTTP) 28110条 + CNAS(playwright) 7451条 **均已联网验证入库+匹配命中** |
 | 5 国家CMA | 待做 | 滑块破解**已止损**→走 Excel 导入降级（见 DESIGN §3.5 / poc/） |
 | 6 打磨 | 待做 | 设置页、错误提示、部署说明 |
 
@@ -136,12 +136,11 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
 
 ---
 
-## 六、下一步：补 CNAS 联网验证 → 阶段 5/6
+## 六、下一步：阶段 6 打磨（阶段 4 已收尾）
 
-### 阶段 4 当前状态（2026-06-04）
+### 阶段 4 最终状态（2026-06-05 ✅ 完成）
 
-**代码已全部完成并通过类型检查 + 47 个单测**。省级 CMA 已联网验证；CNAS 因 chromium
-安装未完成而**未跑联网验证**，是明天唯一的收尾项。
+**代码全部完成并通过类型检查 + 47 个单测；省级 CMA 与 CNAS 均已联网验证。**
 
 已落地的文件：
 - `src/services/sync-progress.ts`（新）—— 公共进度 store + 串行队列 + makeJobId，cap-lib 与
@@ -149,6 +148,8 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
 - `src/sources/prov-cma/cma-scraper.ts`（移植 bzxz，删 checkForUpdate，HTTP+cheerio）。
 - `src/sources/cnas/cnas-scraper.ts`（移植 bzxz，去 channel:'chrome' 用自带 chromium，删
   checkForUpdate/fetchLabInfo）+ `src/sources/cnas/preset-cnas-labs.ts`（内置 1 机构 L0290=本机构）。
+  **新增浏览器退路**：设环境变量 `CNAS_CHROME_PATH` 可用现成 chrome 作 executablePath，
+  免 playwright 下载匹配版本浏览器（下载受限环境用）。
 - `src/services/scrape-service.ts`（新）—— startProvCmaSync / startCnasSync / searchProvCmaLabs /
   listCnasPresets / closeScrapers，抓取→三层归一化→replace 入库（机构列 SELF_ORG_ID）→labs 占位行。
 - `src/api/source-routes.ts`（新，去 auth）+ 挂进 app.ts，shutdown 调 closeScrapers。
@@ -159,21 +160,22 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
 `LI201581410348LI5860` → **28110 条全部入库**（三层归一列齐全、labs data_origin=scraped）→
 用抓来的 `GB 5009.86-2025` 建清单匹配 → `provCma.covered=true, matched=true`。✅
 
-### 明天第一件事：补 CNAS 联网验证
+**CNAS 联网验证已通过（2026-06-05）**：`POST /api/sources/cnas/sync {"labNo":"L0290"}` →
+轮询进度到 done（JSL 反爬全程通过，分页推进，约 4 分钟）→ **7451 条全部入库**
+（`cnas_qualifications.lab_no='_self'`，norm/base 三层归一列 100% 齐全；
+`cnas_labs` data_origin=scraped / sync_status=success / record_count=7451）→ 用抓来的
+`GB 5009.2-2024` 建清单匹配 → `cnas.covered=true`（参数「相对密度」），对照不存在号正确不命中。✅
+> 本次验证走 `CNAS_CHROME_PATH` 退路（系统 Chrome 148），因本机 playwright 自带 chromium
+> 版本与包版本不匹配（包要 1223、装的是 1208）。若要走自带 chromium 需 `npx playwright install chromium`。
 
-1. **装 chromium**（昨晚下载被中断）：`npx playwright install chromium`（几百 MB，耐心等完）。
-2. 起后端 `npm run dev`，调 `POST /api/sources/cnas/sync` body `{"labNo":"L0290"}` → 拿 jobId
-   → 轮询 `GET /api/sources/sync-progress/:jobId` 到 done（**CNAS 有 JSL 反爬，每页间隔 1.5~3.5s +
-   每 8 页重导航，机构大时可能数分钟**，正常）。
-3. 查 `cnas_qualifications` 本机构（cert/lab 列 `_self`）条数 > 0、归一列齐全；用一个抓来的标准号
-   建清单匹配确认 `cnas.covered=true`。
-4. ⚠️ CNAS 受反爬节流可能慢/偶发失败（`CNAS anti-bot challenge not resolved`）；多试一次即可。
-   若始终失败，记录现象 —— **抓取后置策略：不阻塞产品，仍可 Excel 导入**（阶段 1 路径）。
-5. CNAS 验证通过后：把本节状态改「阶段 4 ✅ 完成」，README/DESIGN 同步，下一步转**阶段 6 打磨**
-   （阶段 5 国家 CMA 滑块已止损，走导入降级，非必须）。
+### 下一步：阶段 6 打磨
+
+阶段 4 完成后，主链路 + 综合查询 + 一单一库 + 省级CMA/CNAS 抓取均已联网可用。剩余：
+- **阶段 5 国家 CMA**：滑块破解已止损，走 Excel 导入降级（见 DESIGN §3.5 / poc/），非必须。
+- **阶段 6 打磨**：设置页（替换 PlaceholderPage）、错误提示完善、部署说明。
 
 > 端口残留：tsx 在 Windows 杀不净，重启前清 3000（见第三节）。playwright 还会留 chrome 进程，
-> 验证后 `taskkill //F //IM chrome.exe`。
+> 抓取后 `taskkill //F //IM chrome.exe`。
 
 **复用提示**：抓取器实例在 scrape-service 模块单例持有；进度/串行用公共 sync-progress；
 入库 replace 语义与 import-service 一致（都按 SELF_ORG_ID 清旧行）。

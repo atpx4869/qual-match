@@ -80,9 +80,10 @@ npm run web:dev
   跨 3 机构源 UNION；行级列表 + 按标准号聚合双视图；带年/不带年分流；源过滤；结果导出 Excel。
 - [x] **阶段 3 · 一单一库自动同步**：移植 bzxz cap-lib，按领域订阅 → RuoYi 分页同步
   （hash diff + soft delete）→ 匹配引擎接入 5 档比对（在库/仅引用/已废止/仅系列/不在库）。
-- [~] **阶段 4 · 省级 CMA + CNAS 抓取**（代码完成）：移植 bzxz 抓取器。省级 CMA（HTTP+cheerio）
-  搜机构 → 抓取入库，**已联网验证 28110 条**；CNAS（playwright+JSL 反爬，自带 chromium）代码就绪，
-  联网验证待补（需先 `npx playwright install chromium`）。
+- [x] **阶段 4 · 省级 CMA + CNAS 抓取**：移植 bzxz 抓取器。省级 CMA（HTTP+cheerio）
+  搜机构 → 抓取入库，**已联网验证 28110 条**；CNAS（playwright+JSL 反爬）搜机构 → 抓取入库，
+  **已联网验证 7451 条**。两源均经匹配命中验证。
+  （下载受限环境可设 `CNAS_CHROME_PATH` 用现成 Chrome，免下载 playwright 自带 chromium。）
 - [ ] 阶段 5 · 国家 CMA（滑块破解已止损 → 走 Excel 导入降级）
 - [ ] 阶段 6 · 打磨
 
