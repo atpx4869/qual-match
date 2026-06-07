@@ -29,6 +29,9 @@ export interface SourceCoverage {
 export interface MatchResult {
   stdCode: string;           // 清单原始号
   stdName: string;
+  controlledNo: string;      // 清单原始字段：受控编号
+  hasText: string;           // 清单原始字段：是否有文本
+  department: string;        // 清单原始字段：所属部门
   provCma: SourceCoverage;
   cnas: SourceCoverage;
   natCma: SourceCoverage;
@@ -37,12 +40,47 @@ export interface MatchResult {
   matched: boolean;          // 是否至少被一类机构源覆盖（cap_lib「在库」不算本机构有资质）
 }
 
+export type MatchFilterMode = 'all' | 'covered' | 'uncovered';
+
+// 排序字段：清单文本列（seq=原始导入顺序，默认）。资质列是状态，不参与排序，用筛选。
+export type MatchSortBy = 'seq' | 'stdCode' | 'stdName' | 'controlledNo' | 'department';
+export type SortOrder = 'asc' | 'desc';
+
+// 机构源单列状态筛选：covered=有 / none=无 / series=仅其他年版（seriesHint）。
+export type SourceStateFilter = 'covered' | 'none' | 'series';
+// 一单一库列状态筛选：对齐 CapLibStatus.status 5 档。
+export type CapLibStateFilter = 'in_lib' | 'cite_only' | 'abolished' | 'series_only' | 'not_in_lib';
+
+export interface MatchOptions {
+  page?: number;
+  pageSize?: number;
+  filter?: MatchFilterMode;
+  keyword?: string;
+  sortBy?: MatchSortBy;
+  sortOrder?: SortOrder;
+  // 各资质列状态筛选（可选；省略=不限）
+  provCmaState?: SourceStateFilter;
+  cnasState?: SourceStateFilter;
+  natCmaState?: SourceStateFilter;
+  capLibState?: CapLibStateFilter;
+}
+
 interface QualRow {
   std_code: string;
   std_code_norm: string;
   std_code_base: string;
   std_name: string;
   test_param: string;
+}
+
+interface WatchlistItem {
+  std_code: string;
+  std_code_norm: string;
+  std_code_base: string;
+  std_name: string;
+  controlled_no: string;
+  has_text: string;
+  department: string;
 }
 
 const CHUNK = 500; // SQLite 默认变量上限 999，分块查询保险
@@ -95,18 +133,52 @@ function buildCoverage(norm: string, base: string, byNorm: Map<string, QualRow[]
 export interface MatchOutcome {
   watchlistId: number;
   watchlistName: string;
-  total: number;
-  coveredCount: number;
-  results: MatchResult[];
+  total: number;             // 清单总条数
+  coveredCount: number;      // 全清单已覆盖条数（不受筛选影响）
+  filteredTotal: number;     // 当前筛选条件下的总条数
+  page: number;
+  pageSize: number;
+  results: MatchResult[];    // 当前页结果；未传 pageSize 时为全量（导出用）
 }
 
-export function matchWatchlist(db: Database.Database, watchlistId: number): MatchOutcome {
+function clampPage(n: number | undefined): number {
+  if (!Number.isFinite(n)) return 1;
+  return Math.max(1, Math.floor(n ?? 1));
+}
+
+function clampPageSize(n: number | undefined, fallback: number): number {
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.floor(n ?? fallback));
+}
+
+/** 机构源单列状态：covered=有 / series=仅其他年版 / none=无。供排序无关的列筛选用。 */
+function sourceState(c: SourceCoverage): SourceStateFilter {
+  if (c.covered) return 'covered';
+  if (c.seriesHint) return 'series';
+  return 'none';
+}
+
+const DEFAULT_CAP_LIB: CapLibStatus = {
+  status: 'not_in_lib', inLib: false, libDomain: '', libStatus: '', libRemark: '', seriesNewCode: '', stale: true,
+};
+
+// 排序字段 → 取值器（资质列不排序，只有清单文本列）。seq 用导入原序。
+const SORT_ACCESSOR: Record<MatchSortBy, (r: MatchResult) => string> = {
+  seq: () => '',
+  stdCode: (r) => r.stdCode,
+  stdName: (r) => r.stdName,
+  controlledNo: (r) => r.controlledNo,
+  department: (r) => r.department,
+};
+
+export function matchWatchlist(db: Database.Database, watchlistId: number, opts: MatchOptions = {}): MatchOutcome {
   const wl = db.prepare('SELECT id, name FROM watchlists WHERE id = ?').get(watchlistId) as { id: number; name: string } | undefined;
   if (!wl) throw new NotFoundError(`清单不存在：${watchlistId}`);
 
   const items = db.prepare(
-    'SELECT std_code, std_code_norm, std_code_base, std_name FROM watchlist_items WHERE watchlist_id = ? ORDER BY seq',
-  ).all(watchlistId) as Array<{ std_code: string; std_code_norm: string; std_code_base: string; std_name: string }>;
+    `SELECT std_code, std_code_norm, std_code_base, std_name, controlled_no, has_text, department
+     FROM watchlist_items WHERE watchlist_id = ? ORDER BY seq`,
+  ).all(watchlistId) as WatchlistItem[];
 
   const norms = [...new Set(items.map((i) => i.std_code_norm).filter(Boolean))];
   const bases = [...new Set(items.map((i) => i.std_code_base).filter(Boolean))];
@@ -115,33 +187,90 @@ export function matchWatchlist(db: Database.Database, watchlistId: number): Matc
   const perSource = {} as Record<OrgSource, { byNorm: Map<string, QualRow[]>; byBase: Map<string, QualRow[]> }>;
   for (const s of ORG_SOURCES) perSource[s] = queryBySource(db, s, norms, bases);
 
-  // 一单一库 5 档状态（批量；按清单原始号查，batchStatus 内部归一化）
+  // 一单一库 5 档状态：全量算（筛选/排序需要在全量基础上做），批量 IN 查询。
   const capLibSvc = new CapLibService(db);
   const capLibMap = capLibSvc.batchStatus(items.map((i) => i.std_code));
 
-  const results: MatchResult[] = [];
-  let coveredCount = 0;
-
-  for (const it of items) {
+  // 先为全量每行算好 coverage + capLib + matched（后续筛选/排序复用，避免重算）。
+  const enriched = items.map((it) => {
     const provCma = buildCoverage(it.std_code_norm, it.std_code_base, perSource.prov_cma.byNorm, perSource.prov_cma.byBase);
     const cnas = buildCoverage(it.std_code_norm, it.std_code_base, perSource.cnas.byNorm, perSource.cnas.byBase);
     const natCma = buildCoverage(it.std_code_norm, it.std_code_base, perSource.nat_cma.byNorm, perSource.nat_cma.byBase);
-    const capLib = capLibMap[it.std_code] ?? {
-      status: 'not_in_lib', inLib: false, libDomain: '', libStatus: '', libRemark: '', seriesNewCode: '', stale: true,
-    };
-
+    const capLib = capLibMap[it.std_code] ?? DEFAULT_CAP_LIB;
     const coveredBy: OrgSource[] = [];
     if (provCma.covered) coveredBy.push('prov_cma');
     if (cnas.covered) coveredBy.push('cnas');
     if (natCma.covered) coveredBy.push('nat_cma');
-    const matched = coveredBy.length > 0;
-    if (matched) coveredCount++;
+    const result: MatchResult = {
+      stdCode: it.std_code,
+      stdName: it.std_name,
+      controlledNo: it.controlled_no,
+      hasText: it.has_text,
+      department: it.department,
+      provCma,
+      cnas,
+      natCma,
+      capLib,
+      coveredBy,
+      matched: coveredBy.length > 0,
+    };
+    return result;
+  });
 
-    results.push({ stdCode: it.std_code, stdName: it.std_name, provCma, cnas, natCma, capLib, coveredBy, matched });
+  const coveredCount = enriched.filter((r) => r.matched).length;
+
+  // ── 筛选（全量）：覆盖态 + 关键词 + 各资质列状态 ──
+  const filter = opts.filter ?? 'all';
+  const keyword = (opts.keyword ?? '').trim().toLowerCase();
+
+  let filtered = enriched.filter((r) => {
+    if (filter === 'covered' && !r.matched) return false;
+    if (filter === 'uncovered' && r.matched) return false;
+    if (keyword) {
+      const haystack = [r.stdCode, r.stdName, r.controlledNo, r.hasText, r.department]
+        .map((v) => (v ?? '').toLowerCase());
+      if (!haystack.some((v) => v.includes(keyword))) return false;
+    }
+    if (opts.provCmaState && sourceState(r.provCma) !== opts.provCmaState) return false;
+    if (opts.cnasState && sourceState(r.cnas) !== opts.cnasState) return false;
+    if (opts.natCmaState && sourceState(r.natCma) !== opts.natCmaState) return false;
+    if (opts.capLibState && r.capLib.status !== opts.capLibState) return false;
+    return true;
+  });
+
+  // ── 排序（全量，稳定）：seq 保持导入原序；其余按文本列 localeCompare（中文友好）──
+  const sortBy = opts.sortBy ?? 'seq';
+  if (sortBy !== 'seq') {
+    const dir = opts.sortOrder === 'desc' ? -1 : 1;
+    const accessor = SORT_ACCESSOR[sortBy];
+    filtered = filtered
+      .map((r, i) => [r, i] as const)
+      .sort(([a, ia], [b, ib]) => {
+        const cmp = accessor(a).localeCompare(accessor(b), 'zh-Hans-CN', { numeric: true });
+        return cmp !== 0 ? cmp * dir : ia - ib; // 稳定排序：相等时保持原序
+      })
+      .map(([r]) => r);
   }
+
+  const filteredTotal = filtered.length;
+  const page = clampPage(opts.page);
+  const effectivePageSize = opts.pageSize === undefined
+    ? Math.max(1, filteredTotal)
+    : clampPageSize(opts.pageSize, 500);
+  const start = opts.pageSize === undefined ? 0 : (page - 1) * effectivePageSize;
+  const results = filtered.slice(start, start + effectivePageSize);
 
   // 记录本次匹配时间
   db.prepare("UPDATE watchlists SET matched_at = datetime('now') WHERE id = ?").run(watchlistId);
 
-  return { watchlistId: wl.id, watchlistName: wl.name, total: items.length, coveredCount, results };
+  return {
+    watchlistId: wl.id,
+    watchlistName: wl.name,
+    total: items.length,
+    coveredCount,
+    filteredTotal,
+    page,
+    pageSize: effectivePageSize,
+    results,
+  };
 }

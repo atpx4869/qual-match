@@ -46,6 +46,34 @@ describe('matchWatchlist — 单一机构匹配引擎', () => {
     expect(out.results[0].matched).toBe(false);
   });
 
+  it('分页：只返回当前页，total/filteredTotal 保持全量统计', () => {
+    const rows = Array.from({ length: 5 }, (_, i) => ({ stdCode: `GB/T ${100 + i}-2020` }));
+    const { watchlistId } = importWatchlist(db, '清单分页', rows);
+    const out = matchWatchlist(db, watchlistId, { page: 2, pageSize: 2 });
+    expect(out.total).toBe(5);
+    expect(out.filteredTotal).toBe(5);
+    expect(out.page).toBe(2);
+    expect(out.pageSize).toBe(2);
+    expect(out.results.map((r) => r.stdCode)).toEqual(['GB/T 102-2020', 'GB/T 103-2020']);
+  });
+
+  it('筛选：covered/uncovered 在服务端过滤，coveredCount 仍是全清单覆盖数', () => {
+    importQualifications(db, 'cnas', [{ stdCode: 'GB/T 1-2020' }]);
+    const { watchlistId } = importWatchlist(db, '清单筛选', [
+      { stdCode: 'GB/T 1-2020' },
+      { stdCode: 'GB/T 2-2020' },
+    ]);
+    const covered = matchWatchlist(db, watchlistId, { filter: 'covered', pageSize: 200 });
+    expect(covered.total).toBe(2);
+    expect(covered.coveredCount).toBe(1);
+    expect(covered.filteredTotal).toBe(1);
+    expect(covered.results[0].stdCode).toBe('GB/T 1-2020');
+
+    const uncovered = matchWatchlist(db, watchlistId, { filter: 'uncovered', pageSize: 200 });
+    expect(uncovered.filteredTotal).toBe(1);
+    expect(uncovered.results[0].stdCode).toBe('GB/T 2-2020');
+  });
+
   it('多源命中：省CMA + 国家CMA 都有 → coveredBy 含两类', () => {
     importQualifications(db, 'prov_cma', [{ stdCode: 'GB 5009.3-2016', testParam: '水分' }]);
     importQualifications(db, 'nat_cma', [{ stdCode: 'GB 5009.3-2016', testParam: '水分（国）' }]);
@@ -70,5 +98,67 @@ describe('matchWatchlist — 单一机构匹配引擎', () => {
     importQualifications(db, 'cnas', [{ stdCode: 'GB/T 3-2020' }]); // replace 默认 true
     const cnt = db.prepare('SELECT COUNT(*) c FROM cnas_qualifications').get() as { c: number };
     expect(cnt.c).toBe(1);
+  });
+
+  it('排序：按标准号升序/降序（全量排序，不只当前页）', () => {
+    const { watchlistId } = importWatchlist(db, '清单排序', [
+      { stdCode: 'GB/T 200-2020' },
+      { stdCode: 'GB/T 100-2020' },
+      { stdCode: 'GB/T 300-2020' },
+    ]);
+    const asc = matchWatchlist(db, watchlistId, { sortBy: 'stdCode', sortOrder: 'asc', pageSize: 200 });
+    expect(asc.results.map((r) => r.stdCode)).toEqual(['GB/T 100-2020', 'GB/T 200-2020', 'GB/T 300-2020']);
+    const desc = matchWatchlist(db, watchlistId, { sortBy: 'stdCode', sortOrder: 'desc', pageSize: 200 });
+    expect(desc.results.map((r) => r.stdCode)).toEqual(['GB/T 300-2020', 'GB/T 200-2020', 'GB/T 100-2020']);
+  });
+
+  it('排序默认 seq：不传 sortBy 时保持导入原序', () => {
+    const { watchlistId } = importWatchlist(db, '清单原序', [
+      { stdCode: 'GB/T 300-2020' },
+      { stdCode: 'GB/T 100-2020' },
+      { stdCode: 'GB/T 200-2020' },
+    ]);
+    const out = matchWatchlist(db, watchlistId, { pageSize: 200 });
+    expect(out.results.map((r) => r.stdCode)).toEqual(['GB/T 300-2020', 'GB/T 100-2020', 'GB/T 200-2020']);
+  });
+
+  it('排序跨页一致：第 2 页是全量排序后的切片，不是页内排序', () => {
+    const rows = [
+      { stdCode: 'GB/T 500-2020' }, { stdCode: 'GB/T 100-2020' },
+      { stdCode: 'GB/T 400-2020' }, { stdCode: 'GB/T 200-2020' },
+      { stdCode: 'GB/T 300-2020' },
+    ];
+    const { watchlistId } = importWatchlist(db, '清单排序分页', rows);
+    const p2 = matchWatchlist(db, watchlistId, { sortBy: 'stdCode', sortOrder: 'asc', page: 2, pageSize: 2 });
+    // 全量升序：100,200,300,400,500 → 第 2 页（pageSize 2）= 300,400
+    expect(p2.results.map((r) => r.stdCode)).toEqual(['GB/T 300-2020', 'GB/T 400-2020']);
+  });
+
+  it('资质列状态筛选：provCmaState=covered 只留省CMA有覆盖的', () => {
+    importQualifications(db, 'prov_cma', [{ stdCode: 'GB/T 1-2020' }]);
+    const { watchlistId } = importWatchlist(db, '清单源筛选', [
+      { stdCode: 'GB/T 1-2020' }, // 省CMA有
+      { stdCode: 'GB/T 2-2020' }, // 无
+    ]);
+    const covered = matchWatchlist(db, watchlistId, { provCmaState: 'covered', pageSize: 200 });
+    expect(covered.filteredTotal).toBe(1);
+    expect(covered.results[0].stdCode).toBe('GB/T 1-2020');
+
+    const none = matchWatchlist(db, watchlistId, { provCmaState: 'none', pageSize: 200 });
+    expect(none.filteredTotal).toBe(1);
+    expect(none.results[0].stdCode).toBe('GB/T 2-2020');
+    // coveredCount 不受列筛选影响，仍是全清单覆盖数
+    expect(none.coveredCount).toBe(1);
+  });
+
+  it('资质列状态筛选：series 命中跨年提示行', () => {
+    importQualifications(db, 'cnas', [{ stdCode: 'QB/T 4463-2013' }]);
+    const { watchlistId } = importWatchlist(db, '清单系列筛选', [
+      { stdCode: 'QB/T 4463-2025' }, // 保年没命中，剥年命中 2013 → series
+      { stdCode: 'GB/T 9-2020' },    // 完全无
+    ]);
+    const series = matchWatchlist(db, watchlistId, { cnasState: 'series', pageSize: 200 });
+    expect(series.filteredTotal).toBe(1);
+    expect(series.results[0].stdCode).toBe('QB/T 4463-2025');
   });
 });

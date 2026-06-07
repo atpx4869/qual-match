@@ -7,14 +7,18 @@ import { toCamelCase } from '../shared/case';
 import { getSyncProgress } from '../services/sync-progress';
 import {
   searchProvCmaLabs, startProvCmaSync, listCnasPresets, startCnasSync,
+  subscribeProvCmaLab, subscribeCnasLab,
+  searchNatCmaOrgs, startNatCmaSync, subscribeNatCmaLab,
 } from '../services/scrape-service';
 import { ORG_SOURCE_TABLE, SELF_ORG_ID, isOrgSource } from '../shared/constants';
 
 /**
  * 抓取源路由（阶段 4）。省级 CMA（HTTP）+ CNAS（playwright）在线抓取。无 auth（单用户）。
  *   GET  /api/sources/prov_cma/search?q=   省级 CMA 按机构名搜候选
+ *   POST /api/sources/prov_cma/subscribe    订阅省级 CMA 机构
  *   POST /api/sources/prov_cma/sync         抓取（body { publicDetailId }）→ { jobId }
  *   GET  /api/sources/cnas/presets          内置 CNAS 机构列表
+ *   POST /api/sources/cnas/subscribe        订阅 CNAS 机构
  *   POST /api/sources/cnas/sync             抓取（body { labNo }）→ { jobId }
  *   GET  /api/sources/sync-progress/:jobId  进度轮询（复用公共 sync-progress）
  *   GET  /api/sources/:source/orgs          本机构在该源已抓概况
@@ -34,9 +38,22 @@ export function createSourceRoutes(db: Database.Database): Router {
   // ── 省级 CMA：抓取 ──
   router.post('/api/sources/prov_cma/sync', (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { publicDetailId } = z.object({ publicDetailId: z.string().trim().min(1) }).parse(req.body);
+      const { publicDetailId } = z.object({ publicDetailId: z.string().trim().min(1).optional() }).parse(req.body ?? {});
       const jobId = startProvCmaSync(db, publicDetailId);
       respond(res, { jobId });
+    } catch (e) { next(normalizeError(e)); }
+  });
+
+  // ── 省级 CMA：订阅机构 ──
+  router.post('/api/sources/prov_cma/subscribe', (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const body = z.object({
+        publicDetailId: z.string().trim().min(1),
+        labName: z.string().trim().min(1),
+        region: z.string().trim().optional().default(''),
+      }).parse(req.body);
+      subscribeProvCmaLab(db, body);
+      respond(res, { ok: true });
     } catch (e) { next(normalizeError(e)); }
   });
 
@@ -50,8 +67,58 @@ export function createSourceRoutes(db: Database.Database): Router {
   // ── CNAS：抓取 ──
   router.post('/api/sources/cnas/sync', (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { labNo } = z.object({ labNo: z.string().trim().min(1) }).parse(req.body);
+      const { labNo } = z.object({ labNo: z.string().trim().min(1).optional() }).parse(req.body ?? {});
       const jobId = startCnasSync(db, labNo);
+      respond(res, { jobId });
+    } catch (e) { next(normalizeError(e)); }
+  });
+
+  // ── CNAS：订阅内置机构 ──
+  router.post('/api/sources/cnas/subscribe', (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { labNo } = z.object({ labNo: z.string().trim().min(1) }).parse(req.body);
+      subscribeCnasLab(db, labNo);
+      respond(res, { ok: true });
+    } catch (e) { next(normalizeError(e)); }
+  });
+
+  // ── 国家 CMA：搜机构（cma.cnca.cn，playwright 过滑块）──
+  router.get('/api/sources/nat_cma/search', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { q } = z.object({ q: z.string().trim().min(1, '请输入机构名') }).parse(req.query);
+      const items = await searchNatCmaOrgs(db, q);
+      respond(res, { items: toCamelCase(items), total: items.length });
+    } catch (e) { next(normalizeError(e)); }
+  });
+
+  // ── 国家 CMA：订阅机构 ──
+  router.post('/api/sources/nat_cma/subscribe', (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const body = z.object({
+        certCode: z.string().trim().default(''),
+        orgName: z.string().trim().min(1),
+        placeId: z.string().trim().min(1),
+        applyId: z.string().trim().min(1),
+        region: z.string().trim().optional().default(''),
+      }).parse(req.body);
+      subscribeNatCmaLab(db, body);
+      respond(res, { ok: true });
+    } catch (e) { next(normalizeError(e)); }
+  });
+
+  // ── 国家 CMA：抓取（body 可带完整机构标识，否则用已订阅的）──
+  router.post('/api/sources/nat_cma/sync', (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const body = z.object({
+        certCode: z.string().trim().optional(),
+        orgName: z.string().trim().optional(),
+        placeId: z.string().trim().optional(),
+        applyId: z.string().trim().optional(),
+      }).parse(req.body ?? {});
+      const org = (body.placeId && body.applyId)
+        ? { placeId: body.placeId, applyId: body.applyId, certCode: body.certCode ?? '', orgName: body.orgName ?? '', address: '' }
+        : undefined;
+      const jobId = startNatCmaSync(db, org);
       respond(res, { jobId });
     } catch (e) { next(normalizeError(e)); }
   });
@@ -71,10 +138,13 @@ export function createSourceRoutes(db: Database.Database): Router {
       const source = String(req.params.source);
       if (!isOrgSource(source)) throw new BadRequestError('source 必须是 prov_cma / cnas / nat_cma 之一');
       const meta = ORG_SOURCE_TABLE[source];
+      const cnt = db.prepare(`SELECT COUNT(*) AS c FROM ${meta.qualTable} WHERE ${meta.orgCol} = ?`)
+        .get(SELF_ORG_ID) as { c: number };
       const lab = db.prepare(
-        `SELECT lab_name, record_count, data_origin, last_sync_at, sync_status FROM ${meta.labTable} WHERE ${meta.orgCol} = ?`,
+        `SELECT lab_name, source_ref, region, record_count, data_origin, last_sync_at, sync_status, sync_error
+         FROM ${meta.labTable} WHERE ${meta.orgCol} = ?`,
       ).get(SELF_ORG_ID);
-      respond(res, toCamelCase({ source, lab: lab ?? null }));
+      respond(res, toCamelCase({ source, localCount: cnt.c, lab: lab ?? null }));
     } catch (e) { next(normalizeError(e)); }
   });
 

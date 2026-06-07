@@ -70,6 +70,41 @@ npm run web:dev
 抓取源账号密码通过仓库根 `.env.local`（gitignored）注入，键名 `<SOURCE>_USERNAME` /
 `<SOURCE>_PASSWORD`，**绝不写进代码 / 文档 / 提交**。拷贝 `.env.example` 为 `.env.local` 填值。
 
+## 部署（生产）
+
+单进程部署：后端 Express 同时托管前端构建产物，**无需单独前端服务器**。
+
+```bash
+# 1. 安装依赖（后端 better-sqlite3 需 Node ≥20 原生编译）
+npm install
+npm --prefix web install
+
+# 2. 构建前端 → web/dist/（后端启动时若检测到该目录即静态托管 + SPA fallback）
+npm run web:build
+
+# 3.（仅用 CNAS 在线抓取时）装 playwright 浏览器内核
+npx playwright install chromium
+#   下载受限环境改用现成 Chrome：设置页填「浏览器路径」或设环境变量 CNAS_CHROME_PATH
+#   指向现成 chrome.exe（如 C:/Program Files/Google/Chrome/Application/chrome.exe）。
+
+# 4. 起服务（默认 3000；编译产物方式见「常用命令」的 build/start）
+npm run dev
+#   浏览器开 http://localhost:3000 （生产单端口，前后端同源，无需 Vite proxy）
+```
+
+**端口**：后端固定 3000（开发期前端 5173 经 Vite proxy 转发 `/api` 到 3000）；
+生产单端口 3000 直出 SPA。
+
+**数据备份**：设置页「数据备份」可一键下载整库 sqlite 快照（用 SQLite online backup，
+WAL 一致）；迁移时把下载的 `.db` 放回目标机 `data/qual-match.db` 即可。
+
+**运行参数**：设置页可调 CNAS 浏览器路径与抓取节流间隔（存 settings 表）。
+改浏览器路径后需重启服务生效（浏览器实例为进程内共享单例）。
+
+> ⚠️ **Windows 端口残留**：tsx 子进程 Ctrl-C 可能杀不净，残留占用 3000。重启前若报端口占用：
+> `netstat -ano | grep ":3000.*LISTENING"` 找 PID → `taskkill //F //PID <pid>`。
+> playwright 抓取后还可能留 chrome 进程：`taskkill //F //IM chrome.exe`。
+
 ## 实施进度（按 DESIGN §6.1）
 
 - [x] **阶段 0 · 脚手架**：前后端可运行骨架 + shared 共享层移植 + 全部 12 张表建库 + health 连通
@@ -85,7 +120,7 @@ npm run web:dev
   **已联网验证 7451 条**。两源均经匹配命中验证。
   （下载受限环境可设 `CNAS_CHROME_PATH` 用现成 Chrome，免下载 playwright 自带 chromium。）
 - [ ] 阶段 5 · 国家 CMA（滑块破解已止损 → 走 Excel 导入降级）
-- [ ] 阶段 6 · 打磨
+- [x] **阶段 6 · 打磨**：设置页（数据总览 + CNAS 浏览器路径/节流可配 + 全库备份下载）、部署说明。
 
 **MVP = 阶段 0+1+2+3**：导入资质明细/清单 → 匹配 → 导出 + 综合查询 + 一单一库同步。
 当前 **阶段 0+1+2+3 已完成，MVP 闭环**：4 类资质源齐全（省级CMA/CNAS/国家CMA 靠 Excel 导入，

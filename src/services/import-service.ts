@@ -17,6 +17,9 @@ import { BadRequestError } from '../shared/errors';
 export interface ParsedRow {
   stdCode: string;
   stdName?: string;
+  controlledNo?: string;
+  hasText?: string;
+  department?: string;
   testParam?: string;
   category?: string;
   effectiveDate?: string;
@@ -32,7 +35,10 @@ export interface ImportSummary {
 // ─── 列名识别（容错：同一字段的多种中文/英文别名）──────────────────────────────
 const COLUMN_ALIASES: Record<keyof ParsedRow, string[]> = {
   stdCode:       ['标准号', '标准编号', '标准代号', 'stdcode', 'std_code', 'code', '标准'],
-  stdName:       ['标准名称', '标准名', 'name', 'stdname', '名称'],
+  stdName:       ['中文标准名称', '标准名称', '标准名', 'name', 'stdname', '名称'],
+  controlledNo:  ['受控编号', '受控号', 'controlledno', 'controlled_no'],
+  hasText:       ['是否有文本', '有无文本', '文本', 'hastext', 'has_text'],
+  department:    ['所属部门', '部门', 'department'],
   testParam:     ['检测项目', '检测参数', '项目/参数', '参数', 'testparam', 'item', '项目'],
   category:      ['类别', '大类', '领域', 'category'],
   effectiveDate: ['有效期起', '生效日期', '批准日期', 'effectivedate', '有效日期'],
@@ -85,6 +91,9 @@ export async function parseExcelBuffer(buffer: Buffer): Promise<ParsedRow[]> {
     rows.push({
       stdCode,
       stdName: pick(row, 'stdName'),
+      controlledNo: pick(row, 'controlledNo'),
+      hasText: pick(row, 'hasText'),
+      department: pick(row, 'department'),
       testParam: pick(row, 'testParam'),
       category: pick(row, 'category'),
       effectiveDate: pick(row, 'effectiveDate'),
@@ -103,7 +112,9 @@ export function importWatchlist(db: Database.Database, name: string, rows: Parse
 
   const insertWl = db.prepare('INSERT INTO watchlists (name, item_count) VALUES (?, 0)');
   const insertItem = db.prepare(
-    'INSERT INTO watchlist_items (watchlist_id, std_code, std_code_norm, std_code_base, std_name, seq) VALUES (?, ?, ?, ?, ?, ?)',
+    `INSERT INTO watchlist_items
+      (watchlist_id, std_code, std_code_norm, std_code_base, std_name, controlled_no, has_text, department, seq)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
   const txn = db.transaction(() => {
@@ -117,7 +128,10 @@ export function importWatchlist(db: Database.Database, name: string, rows: Parse
         if (summary.skippedReasons.length < 10) summary.skippedReasons.push(`无效标准号：${r.stdCode}`);
         continue;
       }
-      insertItem.run(wlId, clean, norm, extractBaseCode(clean), r.stdName ?? '', seq++);
+      insertItem.run(
+        wlId, clean, norm, extractBaseCode(clean), r.stdName ?? '',
+        r.controlledNo ?? '', r.hasText ?? '', r.department ?? '', seq++,
+      );
       summary.inserted++;
     }
     db.prepare('UPDATE watchlists SET item_count = ? WHERE id = ?').run(summary.inserted, wlId);

@@ -33,6 +33,7 @@ const label = computed(() => {
     const s = p.stats;
     return `${phase} · 新增 ${s.added}、变更 ${s.changed}、未变 ${s.unchanged}、软删 ${s.removedSoft}`;
   }
+  if (!p.total) return `${phase} · 正在获取总量`;
   return `${phase} ${p.current}/${p.total || '?'}`;
 });
 </script>

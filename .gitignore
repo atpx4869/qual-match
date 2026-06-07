@@ -5,6 +5,7 @@ web/node_modules/
 # 构建产物
 dist/
 web/dist/
+*.tsbuildinfo
 
 # 运行时数据（SQLite 库 + WAL/SHM）
 data/*.db

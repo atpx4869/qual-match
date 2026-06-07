@@ -7,10 +7,13 @@ import {
   listWatchlists, createWatchlistFromCodes, createWatchlistFromExcel,
   deleteWatchlist, matchWatchlist, exportWatchlist,
   type WatchlistSummary, type MatchOutcome, type MatchResult,
+  type MatchSortBy, type SortOrder, type SourceStateFilter, type CapLibStateFilter,
 } from '@/api/watchlist';
 import CoverageTag from '@/components/CoverageTag.vue';
 import CapLibStatusTag from '@/components/CapLibStatusTag.vue';
 import QualImportDialog from '@/components/QualImportDialog.vue';
+
+const PAGE_SIZE_OPTIONS = [200, 300, 500, 1000, 2000];
 
 const watchlists = ref<WatchlistSummary[]>([]);
 const currentId = ref<number | null>(null);
@@ -29,21 +32,44 @@ const creating = ref(false);
 // 筛选
 const filterMode = ref<'all' | 'uncovered' | 'covered'>('all');
 const keyword = ref('');
+const page = ref(1);
+const pageSize = ref(500);
+
+// 排序（服务端）：seq=原始导入顺序
+const sortBy = ref<MatchSortBy>('seq');
+const sortOrder = ref<SortOrder>('asc');
+
+// 资质列状态筛选（服务端；undefined=不限）
+const provCmaState = ref<SourceStateFilter | undefined>(undefined);
+const cnasState = ref<SourceStateFilter | undefined>(undefined);
+const natCmaState = ref<SourceStateFilter | undefined>(undefined);
+const capLibState = ref<CapLibStateFilter | undefined>(undefined);
+
+// 资质源列筛选下拉项（covered/none/series）
+const SOURCE_STATE_OPTIONS: { value: SourceStateFilter; label: string }[] = [
+  { value: 'covered', label: '✓ 有覆盖' },
+  { value: 'none', label: '— 无' },
+  { value: 'series', label: '~ 仅其他年版' },
+];
+// 一单一库列筛选下拉项（5 档）
+const CAP_LIB_STATE_OPTIONS: { value: CapLibStateFilter; label: string }[] = [
+  { value: 'in_lib', label: '🟢 在库' },
+  { value: 'cite_only', label: '🟡 仅引用' },
+  { value: 'abolished', label: '🟠 已废止' },
+  { value: 'series_only', label: '🔴 仅系列' },
+  { value: 'not_in_lib', label: '⚪ 不在库' },
+];
 
 const filteredResults = computed<MatchResult[]>(() => {
-  if (!outcome.value) return [];
-  let rows = outcome.value.results;
-  if (filterMode.value === 'uncovered') rows = rows.filter((r) => !r.matched);
-  else if (filterMode.value === 'covered') rows = rows.filter((r) => r.matched);
-  const kw = keyword.value.trim().toLowerCase();
-  if (kw) rows = rows.filter((r) => r.stdCode.toLowerCase().includes(kw) || (r.stdName ?? '').toLowerCase().includes(kw));
-  return rows;
+  return outcome.value?.results ?? [];
 });
 
 const coverageRate = computed(() => {
   if (!outcome.value || outcome.value.total === 0) return 0;
   return Math.round((outcome.value.coveredCount / outcome.value.total) * 100);
 });
+
+const resultTotal = computed(() => outcome.value?.filteredTotal ?? 0);
 
 async function refreshWatchlists() {
   try {
@@ -53,11 +79,25 @@ async function refreshWatchlists() {
   }
 }
 
-async function runMatch(id: number) {
+async function runMatch(id: number, resetPage = true) {
+  if (resetPage) page.value = 1;
   loading.value = true;
   try {
-    outcome.value = await matchWatchlist(id);
+    outcome.value = await matchWatchlist(id, {
+      page: page.value,
+      pageSize: pageSize.value,
+      filter: filterMode.value,
+      keyword: keyword.value.trim() || undefined,
+      sortBy: sortBy.value,
+      sortOrder: sortOrder.value,
+      provCmaState: provCmaState.value,
+      cnasState: cnasState.value,
+      natCmaState: natCmaState.value,
+      capLibState: capLibState.value,
+    });
     currentId.value = id;
+    page.value = outcome.value.page;
+    pageSize.value = outcome.value.pageSize;
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '匹配失败');
   } finally {
@@ -116,11 +156,48 @@ async function onExport() {
   }
 }
 
+function onFilterChange() {
+  if (currentId.value) void runMatch(currentId.value, true);
+}
+
+// Element Plus 服务端排序：sort-change 给 { prop, order }，prop/order 可能为空。
+function onSortChange({ prop, order }: { prop: string | null; order: 'ascending' | 'descending' | null }) {
+  if (!order || !prop) {
+    sortBy.value = 'seq';
+    sortOrder.value = 'asc';
+  } else {
+    sortBy.value = prop as MatchSortBy;
+    sortOrder.value = order === 'descending' ? 'desc' : 'asc';
+  }
+  if (currentId.value) void runMatch(currentId.value, true);
+}
+
+// 资质列状态筛选变化（下拉选/清空）→ 回到第 1 页重新匹配
+function onSourceStateChange() {
+  if (currentId.value) void runMatch(currentId.value, true);
+}
+
+function onPageChange(p: number) {
+  page.value = p;
+  if (currentId.value) void runMatch(currentId.value, false);
+}
+
+function onPageSizeChange(size: number) {
+  pageSize.value = size;
+  if (currentId.value) void runMatch(currentId.value, true);
+}
+
 function rowClass({ row }: { row: MatchResult }) {
   return row.matched ? '' : 'row-uncovered';
 }
 
-onMounted(refreshWatchlists);
+onMounted(async () => {
+  await refreshWatchlists();
+  // 默认显示最新导入的清单（列表已按 id DESC，取第一个）
+  if (watchlists.value.length > 0) {
+    void runMatch(watchlists.value[0].id);
+  }
+});
 </script>
 
 <template>
@@ -150,31 +227,97 @@ onMounted(refreshWatchlists);
         <el-tag>共 {{ outcome.total }} 个标准</el-tag>
         <el-tag type="success">已覆盖 {{ outcome.coveredCount }}</el-tag>
         <el-tag type="info">覆盖率 {{ coverageRate }}%</el-tag>
+        <el-tag v-if="resultTotal !== outcome.total" type="warning">筛选 {{ resultTotal }} 条</el-tag>
         <div class="summary-filters">
-          <el-radio-group v-model="filterMode" size="small">
+          <el-radio-group v-model="filterMode" size="small" @change="onFilterChange">
             <el-radio-button value="all">全部</el-radio-button>
             <el-radio-button value="covered">已覆盖</el-radio-button>
             <el-radio-button value="uncovered">未覆盖</el-radio-button>
           </el-radio-group>
-          <el-input v-model="keyword" placeholder="筛选标准号/名称" clearable size="small" style="width: 180px" />
+          <el-input
+            v-model="keyword"
+            placeholder="筛选清单字段"
+            clearable
+            size="small"
+            style="width: 180px"
+            @keyup.enter="onFilterChange"
+            @clear="onFilterChange"
+          />
+          <el-button size="small" @click="onFilterChange">筛选</el-button>
         </div>
       </div>
 
-      <el-table :data="filteredResults" v-loading="loading" :row-class-name="rowClass" border stripe height="calc(100vh - 240px)">
-        <el-table-column prop="stdCode" label="标准号" width="180" fixed />
-        <el-table-column prop="stdName" label="标准名称" min-width="200" show-overflow-tooltip />
-        <el-table-column label="省级CMA" width="130" align="center">
+      <el-table
+        :data="filteredResults" v-loading="loading" :row-class-name="rowClass"
+        border stripe height="calc(100vh - 285px)"
+        @sort-change="onSortChange"
+      >
+        <el-table-column prop="stdCode" label="标准号" width="180" fixed sortable="custom" />
+        <el-table-column prop="stdName" label="中文标准名称" min-width="220" show-overflow-tooltip sortable="custom" />
+        <el-table-column prop="controlledNo" label="受控编号" width="140" show-overflow-tooltip sortable="custom" />
+        <el-table-column prop="hasText" label="是否有文本" width="110" align="center" show-overflow-tooltip />
+        <el-table-column prop="department" label="所属部门" width="140" show-overflow-tooltip sortable="custom" />
+
+        <el-table-column width="140" align="center">
+          <template #header>
+            <div class="col-filter-header">
+              <span>省级CMA</span>
+              <el-select
+                v-model="provCmaState" placeholder="全部" clearable size="small"
+                class="col-filter-select" @change="onSourceStateChange"
+              >
+                <el-option v-for="o in SOURCE_STATE_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
+              </el-select>
+            </div>
+          </template>
           <template #default="{ row }"><CoverageTag :coverage="row.provCma" /></template>
         </el-table-column>
-        <el-table-column label="CNAS" width="130" align="center">
+
+        <el-table-column width="140" align="center">
+          <template #header>
+            <div class="col-filter-header">
+              <span>CNAS</span>
+              <el-select
+                v-model="cnasState" placeholder="全部" clearable size="small"
+                class="col-filter-select" @change="onSourceStateChange"
+              >
+                <el-option v-for="o in SOURCE_STATE_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
+              </el-select>
+            </div>
+          </template>
           <template #default="{ row }"><CoverageTag :coverage="row.cnas" /></template>
         </el-table-column>
-        <el-table-column label="国家CMA" width="130" align="center">
+
+        <el-table-column width="140" align="center">
+          <template #header>
+            <div class="col-filter-header">
+              <span>国家CMA</span>
+              <el-select
+                v-model="natCmaState" placeholder="全部" clearable size="small"
+                class="col-filter-select" @change="onSourceStateChange"
+              >
+                <el-option v-for="o in SOURCE_STATE_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
+              </el-select>
+            </div>
+          </template>
           <template #default="{ row }"><CoverageTag :coverage="row.natCma" /></template>
         </el-table-column>
-        <el-table-column label="一单一库" width="130" align="center">
+
+        <el-table-column width="150" align="center">
+          <template #header>
+            <div class="col-filter-header">
+              <span>一单一库</span>
+              <el-select
+                v-model="capLibState" placeholder="全部" clearable size="small"
+                class="col-filter-select" @change="onSourceStateChange"
+              >
+                <el-option v-for="o in CAP_LIB_STATE_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
+              </el-select>
+            </div>
+          </template>
           <template #default="{ row }"><CapLibStatusTag :cap-lib="row.capLib" /></template>
         </el-table-column>
+
         <el-table-column label="是否覆盖" width="100" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.matched" type="success" size="small">已覆盖</el-tag>
@@ -182,6 +325,18 @@ onMounted(refreshWatchlists);
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pager">
+        <el-pagination
+          layout="total, sizes, prev, pager, next, jumper"
+          :total="resultTotal"
+          :page-sizes="PAGE_SIZE_OPTIONS"
+          :current-page="page"
+          :page-size="pageSize"
+          @current-change="onPageChange"
+          @size-change="onPageSizeChange"
+        />
+      </div>
     </template>
 
     <!-- 新建清单对话框 -->
@@ -205,7 +360,7 @@ onMounted(refreshWatchlists);
           </el-upload>
         </el-form-item>
         <el-form-item v-else label="标准号">
-          <el-input v-model="pasteText" type="textarea" :rows="8" placeholder="每行一个标准号，或用逗号/空格分隔&#10;GB/T 3325-2024&#10;GB 5009.3-2016" />
+          <el-input v-model="pasteText" type="textarea" :rows="8" placeholder="每行一个标准号，或用逗号/分号/Tab 分隔&#10;GB/T 3325-2024&#10;GB 5009.3-2016" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -225,6 +380,11 @@ onMounted(refreshWatchlists);
 .summary-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .summary-name { font-weight: 600; }
 .summary-filters { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 .upload-tip { color: var(--el-text-color-secondary); font-size: 12px; }
 :deep(.row-uncovered) { background: var(--el-color-danger-light-9); }
+.col-filter-header { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.col-filter-select { width: 100%; }
+/* 表头下拉不撑高表头：去掉 select 自带的最小高度感 */
+.col-filter-header :deep(.el-select__wrapper) { min-height: 24px; font-weight: normal; }
 </style>

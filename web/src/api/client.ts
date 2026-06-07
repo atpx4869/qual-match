@@ -100,3 +100,32 @@ export async function apiDownload(url: string, body?: unknown): Promise<void> {
   a.remove();
   URL.revokeObjectURL(objUrl);
 }
+
+/** GET 触发下载（全库备份）。不解 Result 壳，直接拿 blob 触发浏览器下载。
+ *  文件名兼容 RFC5987 filename*=UTF-8'' 与普通 filename="..."。 */
+export async function apiDownloadGet(url: string, defaultName = 'download'): Promise<void> {
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    // 错误时后端返回 Result 壳 JSON
+    try {
+      const json = (await resp.json()) as ResultShell<unknown>;
+      if (json.error) throw new ApiClientError(json.error);
+    } catch (e) {
+      if (e instanceof ApiClientError) throw e;
+    }
+    throw new ApiClientError({ code: 'DOWNLOAD_FAILED', message: '下载失败' });
+  }
+  const blob = await resp.blob();
+  const disposition = resp.headers.get('Content-Disposition') ?? '';
+  const utf8 = disposition.match(/filename\*=UTF-8''([^;]+)/);
+  const plain = disposition.match(/filename="?([^";]+)"?/);
+  const fileName = utf8 ? decodeURIComponent(utf8[1]) : (plain ? plain[1] : defaultName);
+  const objUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objUrl;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objUrl);
+}

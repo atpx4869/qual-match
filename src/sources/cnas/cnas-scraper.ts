@@ -18,6 +18,14 @@ import type { Browser, Page } from 'playwright';
 
 const CNAS_BASE = 'https://las.cnas.org.cn/LAS/publish';
 
+/** 抓取运行参数（来自 settings，全可选，缺省时与改造前行为一致）。 */
+export interface CnasScrapeOpts {
+  /** 浏览器 executablePath，仅首次 launch 生效。 */
+  chromePath?: string;
+  /** 翻页节流下限（ms），实际等待 = throttleMs + random(0~2000)。默认 1500。 */
+  throttleMs?: number;
+}
+
 export interface CnasCapability {
   num: number;
   objCh: string;
@@ -86,16 +94,17 @@ export class CnasScraper {
   private activePages = 0;
   private waiters: Array<() => void> = [];
 
-  /** 启动（或返回）共享 Chromium。并发去重。 */
-  private async ensureBrowser(): Promise<Browser> {
+  /** 启动（或返回）共享 Chromium。并发去重。
+   *  chromePath 优先用传入值（来自 settings），否则回退环境变量。仅首次 launch 生效。 */
+  private async ensureBrowser(chromePath?: string): Promise<Browser> {
     if (this.browser && this.browser.isConnected()) return this.browser;
     if (!this.browserLaunch) {
       this.browserLaunch = (async () => {
         const pw = await import('playwright');
-        const chromePath = process.env.CNAS_CHROME_PATH?.trim();
+        const execPath = chromePath?.trim() || process.env.CNAS_CHROME_PATH?.trim();
         const b = await pw.chromium.launch({
           headless: true,
-          ...(chromePath ? { executablePath: chromePath } : {}),
+          ...(execPath ? { executablePath: execPath } : {}),
           args: ['--disable-blink-features=AutomationControlled'],
         });
         b.on('disconnected', () => { this.browser = null; this.browserLaunch = null; });
@@ -120,11 +129,11 @@ export class CnasScraper {
   }
 
   /** 开一个独立 page（独立 context）。调用方必须在 finally 里 release()。 */
-  private async openPage(): Promise<{ page: Page; release: () => Promise<void> }> {
+  private async openPage(chromePath?: string): Promise<{ page: Page; release: () => Promise<void> }> {
     await this.acquireSlot();
     let context: import('playwright').BrowserContext | null = null;
     try {
-      const browser = await this.ensureBrowser();
+      const browser = await this.ensureBrowser(chromePath);
       context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
       });
@@ -301,8 +310,10 @@ export class CnasScraper {
   async fetchCapabilities(
     labInfo: CnasLabInfo,
     onProgress?: (fetched: number, total: number) => void,
+    opts?: CnasScrapeOpts,
   ): Promise<CnasCapability[]> {
-    const { page, release } = await this.openPage();
+    const { page, release } = await this.openPage(opts?.chromePath);
+    const throttleMs = opts?.throttleMs ?? 1500;
 
     const all: CnasCapability[] = [];
     let start = 0;
@@ -347,7 +358,7 @@ export class CnasScraper {
           requestCount = 0;
           await sleep(3000 + Math.random() * 2000);
         } else if (start < total) {
-          await sleep(1500 + Math.random() * 2000);
+          await sleep(throttleMs + Math.random() * 2000);
         }
       }
     } finally {

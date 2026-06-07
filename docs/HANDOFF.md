@@ -2,7 +2,7 @@
 
 > **下次继续开发先读这份。** 它让你（或新的开发会话）快速恢复上下文、跑起项目、接着干。
 > 单一真相源是 [`DESIGN.md`](DESIGN.md)（完整设计 6 节）；本文件是「当前到哪了 + 怎么接着走」。
-> 最后更新：2026-06-05（阶段 4 ✅ 完成 —— 省级 CMA 与 CNAS 均已联网验证入库+匹配命中）。
+> 最后更新：2026-06-07（阶段 6 ✅ 完成 —— 设置页 / 部署说明 / 全库备份已落地；后端 65 个单测 + 前后端类型检查通过）。
 
 ---
 
@@ -27,8 +27,8 @@
 | 2 综合查询 | ✅ 完成 | 独立于清单，对本地资质库做关键词/标准号查询（行级+聚合双视图、源过滤、导出） |
 | 3 一单一库同步 | ✅ 完成 | 移植 bzxz cap-lib，领域订阅+同步（hash diff+soft delete）+ 匹配引擎 5 档比对。**MVP 闭环** |
 | **4 省级CMA+CNAS抓取** | ✅ 完成 | 省级CMA(HTTP) 28110条 + CNAS(playwright) 7451条 **均已联网验证入库+匹配命中** |
-| 5 国家CMA | 待做 | 滑块破解**已止损**→走 Excel 导入降级（见 DESIGN §3.5 / poc/） |
-| 6 打磨 | 待做 | 设置页、错误提示、部署说明 |
+| 5 国家 CMA | ✅ 在线抓取已打通 | 2026-06-08 攻克：滑块缺口直检(Sobel)20/20稳定 + 三层下钻(list机构→场所→formAbility明细)+ finalX 参数。后端抓取器/service/路由已落地并联网验证(湖北省产品质量监督检验研究院 5 场所 10955 条)。前端 tab 待补；Excel 导入降级仍保留。见 DESIGN §3.5 / `poc/nat_cma_online_scraper.py` / `src/sources/nat-cma/` |
+| **6 打磨** | ✅ 完成 | 设置页（数据总览 + CNAS 设置 + 全库备份）、部署说明、分页/筛选/错误提示打磨 |
 
 ---
 
@@ -45,7 +45,7 @@ npm run web:dev             # 前端，5173，/api 经 Vite proxy 转发到 3000
 # 浏览器开 http://localhost:5173
 
 # 验证
-npm test                    # 后端单测（vitest，23 个）
+npm test                    # 后端单测（vitest，65 个）
 npm run web:typecheck       # 前端类型检查
 npx tsc -p tsconfig.json --noEmit   # 后端类型检查
 ```
@@ -84,6 +84,8 @@ src/                        后端（CommonJS，tsx 跑 / tsc 编译）
 │   ├── sync-progress.ts     ★ 公共进度 store + 串行队列 + makeJobId（cap-lib / scrape 共用）
 │   ├── scrape-service.ts    ★ 抓取入库编排：startProvCmaSync/startCnasSync/searchProvCmaLabs/listCnasPresets
 │   ├── scrape-service.test.ts  抓取器解析单测（CMA cheerio / CNAS parseUrl，不打网络）
+│   ├── system-service.ts    ★ 阶段6：数据总览 + CNAS 设置 + SQLite online backup
+│   ├── system-service.test.ts
 │   └── export-service.ts   exportMatchResult + exportQualificationSearch → xlsx buffer
 ├── sources/                 抓取器（阶段 4，从 bzxz 移植）
 │   ├── prov-cma/cma-scraper.ts  省级CMA HTTP+cheerio（search/scrapeFull，删 checkForUpdate）
@@ -96,7 +98,8 @@ src/                        后端（CommonJS，tsx 跑 / tsc 编译）
 │   ├── qualification-routes.ts 综合查询：GET search / by-standard，POST export
 │   ├── import-routes.ts    POST /api/import/qualifications
 │   ├── cap-lib-routes.ts   一单一库：GET domains / PUT subscribe / POST sync / GET sync-progress / POST cleanup
-│   └── source-routes.ts    抓取：prov_cma/search·sync、cnas/presets·sync、sync-progress、:source/orgs（去auth）
+│   ├── source-routes.ts    抓取：prov_cma/search·sync、cnas/presets·sync、sync-progress、:source/orgs（去auth）
+│   └── system-routes.ts    阶段6：overview/settings/backup
 └── index.ts                启动入口
 
 web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
@@ -105,12 +108,12 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
 ├── api/qualification.ts    类型(QualSearchRow/QualStandardGroup) + 综合查询 API + SOURCE_LABEL
 ├── api/cap-lib.ts          类型(DomainMeta/SyncProgress/CapLibStatus) + 一单一库 API
 ├── api/sources.ts          类型(ProvCmaSearchResult/CnasPreset) + 省级CMA/CNAS 抓取 API
-├── pages/MatchPage.vue     ★ 清单匹配主页（已实做，含一单一库第5列）
+├── api/system.ts           阶段6：设置页 API（overview/settings/backup）
+├── pages/MatchPage.vue     ★ 清单匹配主页（已实做，含一单一库第5列 + 服务端分页/排序/列筛选）
 ├── pages/SearchPage.vue    ★ 综合查询主页（已实做，行级+聚合双视图）
 ├── pages/SourcesPage.vue   ★ 资质管理（一单一库 + 省级CMA + CNAS tab 实做；国家CMA 占位）
-├── pages/PlaceholderPage.vue  设置占位（阶段6 替换）
+├── pages/SettingsPage.vue  ★ 设置页（数据总览 + CNAS 浏览器/节流设置 + 全库备份）
 ├── components/CoverageTag.vue / CapLibStatusTag.vue（5档色板）/ SyncProgress.vue / QualImportDialog.vue
-├── components/CoverageTag.vue / QualImportDialog.vue
 ├── App.vue / router.ts / main.ts
 ```
 
@@ -136,11 +139,11 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
 
 ---
 
-## 六、下一步：阶段 6 打磨（阶段 4 已收尾）
+## 六、当前收尾状态：阶段 6 已完成
 
 ### 阶段 4 最终状态（2026-06-05 ✅ 完成）
 
-**代码全部完成并通过类型检查 + 47 个单测；省级 CMA 与 CNAS 均已联网验证。**
+**代码全部完成并通过类型检查；省级 CMA 与 CNAS 均已联网验证。**
 
 已落地的文件：
 - `src/services/sync-progress.ts`（新）—— 公共进度 store + 串行队列 + makeJobId，cap-lib 与
@@ -168,11 +171,35 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
 > 本次验证走 `CNAS_CHROME_PATH` 退路（系统 Chrome 148），因本机 playwright 自带 chromium
 > 版本与包版本不匹配（包要 1223、装的是 1208）。若要走自带 chromium 需 `npx playwright install chromium`。
 
-### 下一步：阶段 6 打磨
+### 阶段 6 最终状态（2026-06-07 ✅ 完成）
 
-阶段 4 完成后，主链路 + 综合查询 + 一单一库 + 省级CMA/CNAS 抓取均已联网可用。剩余：
-- **阶段 5 国家 CMA**：滑块破解已止损，走 Excel 导入降级（见 DESIGN §3.5 / poc/），非必须。
-- **阶段 6 打磨**：设置页（替换 PlaceholderPage）、错误提示完善、部署说明。
+阶段 6 已把“可用”推进到“可交付”：
+- `src/services/system-service.ts` + `src/api/system-routes.ts`：数据总览、CNAS 浏览器路径/抓取节流设置、SQLite online backup 全库备份下载。
+- `web/src/pages/SettingsPage.vue` + `web/src/api/system.ts`：设置页替换 `PlaceholderPage`，路由和侧边栏已接入。
+- `README.md`：补齐生产部署说明、Playwright/Chrome 退路、备份与运行参数说明。
+- `MatchPage.vue` / `match-service.ts`：清单匹配支持服务端分页、排序、关键词筛选、资质列状态筛选。
+- 验证：`npm test`（7 个测试文件 / 65 个用例）、`npx tsc -p tsconfig.json --noEmit`、`npm run web:typecheck` 均通过。
+
+剩余只有可选项：
+- **国家 CMA 在线抓取（2026-06-08 已打通 ✅，原止损翻案）**：
+  - **滑块**：原判断「命中率不稳」是错的。真因是当年用模板匹配(ddddocr/cv2)，结果偏右约 22px。
+    正解是**缺口直检**：对背景图缺口行带(y..y+45)做垂直 Sobel，找相距一个滑块宽(45px)的两条
+    竖边，左边那条 = 缺口左缘 = moveX。实测 20/20 稳定。
+  - **入口语义**也搞清了：list 不是「反查机构」，按机构名能查到，但**提交 body 必须带 finalX=<moveX>**
+    (除了 captchaVerify)。三层下钻：list(机构,含 placeId/applyId) → formAbility 场所表(每场所 placeId)
+    → formAbility(按场所抓明细,分页)。资质**按场所分**，一个机构遍历所有场所。
+  - **已落地**：`src/sources/nat-cma/nat-cma-scraper.ts`(playwright+页内 canvas Sobel+fetch)、
+    scrape-service 的 `searchNatCmaOrgs/subscribeNatCmaLab/startNatCmaSync`、source-routes 的
+    `/api/sources/nat_cma/search·subscribe·sync`。后端类型检查 + 65 单测通过；联网验证
+    (湖北省产品质量监督检验研究院 5 场所合计 10955 条，标准号正确)。
+  - **下一步（明天换电脑续）**：① 前端 SourcesPage 加「国家 CMA」tab（仿省级 CMA：搜机构→订阅→
+    抓取→进度），api/sources.ts 加对应函数；② 浏览器退路：本机 playwright 自带 chromium 版本
+    不匹配，跑抓取要设环境变量 `NAT_CMA_CHROME_PATH`(或 CNAS_CHROME_PATH) 指向系统 Chrome
+    (`C:/Program Files/Google/Chrome/Application/chrome.exe`)，或 `npx playwright install chromium`；
+    ③ 设置页可加 `nat_cma_scrape_enabled` 开关 UI（db 已有该 setting，默认 '0'）；
+    ④ 全量抓取规模大(单机构上万条)，scrapeOrg 支持 `maxPagesPerPlace` 限量。
+  - PoC 完整可跑脚本：`poc/nat_cma_online_scraper.py`(Python 版,含滑块自测 --self-test)。
+- **发布前验收**：真实 UI 冒烟一次（导入清单→匹配→导出、设置页备份下载、CNAS 配置保存）。
 
 > 端口残留：tsx 在 Windows 杀不净，重启前清 3000（见第三节）。playwright 还会留 chrome 进程，
 > 抓取后 `taskkill //F //IM chrome.exe`。
@@ -197,5 +224,6 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
 
 - `DESIGN.md` —— 完整设计（架构/数据模型/数据源/匹配引擎/前端/路线图），单一真相源
 - `README.md` —— 项目总览 + 起步
-- `poc/` —— 国家 CMA 滑块破解 PoC（已止损，结论见 DESIGN §3.5；`gen_test_xlsx.cjs` 可生成测试数据）
+- `poc/` —— 国家 CMA 在线复探/滑块 PoC（已止损，结论见 DESIGN §3.5；`nat_cma_online_probe.py`
+  可复跑在线入口，`gen_test_xlsx.cjs` 可生成测试数据）
 - bzxz 项目（`../bzxz`）—— 移植来源，阶段 3/4 抓取器在其 `src/services` 下

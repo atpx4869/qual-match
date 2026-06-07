@@ -29,6 +29,9 @@ export type OrgSource = 'prov_cma' | 'cnas' | 'nat_cma';
 export interface MatchResult {
   stdCode: string;
   stdName: string;
+  controlledNo: string;
+  hasText: string;
+  department: string;
   provCma: SourceCoverage;
   cnas: SourceCoverage;
   natCma: SourceCoverage;
@@ -42,7 +45,28 @@ export interface MatchOutcome {
   watchlistName: string;
   total: number;
   coveredCount: number;
+  filteredTotal: number;
+  page: number;
+  pageSize: number;
   results: MatchResult[];
+}
+
+export type MatchSortBy = 'seq' | 'stdCode' | 'stdName' | 'controlledNo' | 'department';
+export type SortOrder = 'asc' | 'desc';
+export type SourceStateFilter = 'covered' | 'none' | 'series';
+export type CapLibStateFilter = 'in_lib' | 'cite_only' | 'abolished' | 'series_only' | 'not_in_lib';
+
+export interface MatchQuery {
+  page?: number;
+  pageSize?: number;
+  filter?: 'all' | 'covered' | 'uncovered';
+  keyword?: string;
+  sortBy?: MatchSortBy;
+  sortOrder?: SortOrder;
+  provCmaState?: SourceStateFilter;
+  cnasState?: SourceStateFilter;
+  natCmaState?: SourceStateFilter;
+  capLibState?: CapLibStateFilter;
 }
 
 // ─── API ───────────────────────────────────────────────────────────────────
@@ -68,8 +92,22 @@ export function deleteWatchlist(id: number): Promise<{ ok: boolean }> {
   return apiDelete(`/api/watchlists/${id}`);
 }
 
-export function matchWatchlist(id: number): Promise<MatchOutcome> {
-  return apiGet(`/api/watchlists/${id}/match`);
+export function matchWatchlist(id: number, query: MatchQuery = {}): Promise<MatchOutcome> {
+  const sp = new URLSearchParams();
+  if (query.page !== undefined) sp.set('page', String(query.page));
+  if (query.pageSize !== undefined) sp.set('pageSize', String(query.pageSize));
+  if (query.filter) sp.set('filter', query.filter);
+  if (query.keyword) sp.set('keyword', query.keyword);
+  if (query.sortBy && query.sortBy !== 'seq') {
+    sp.set('sortBy', query.sortBy);
+    sp.set('sortOrder', query.sortOrder ?? 'asc');
+  }
+  if (query.provCmaState) sp.set('provCmaState', query.provCmaState);
+  if (query.cnasState) sp.set('cnasState', query.cnasState);
+  if (query.natCmaState) sp.set('natCmaState', query.natCmaState);
+  if (query.capLibState) sp.set('capLibState', query.capLibState);
+  const qs = sp.toString();
+  return apiGet(`/api/watchlists/${id}/match${qs ? `?${qs}` : ''}`);
 }
 
 export function exportWatchlist(id: number): Promise<void> {

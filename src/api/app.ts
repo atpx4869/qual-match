@@ -8,6 +8,7 @@ import { createImportRoutes } from './import-routes';
 import { createQualificationRoutes } from './qualification-routes';
 import { createCapLibRoutes } from './cap-lib-routes';
 import { createSourceRoutes } from './source-routes';
+import { createSystemRoutes } from './system-routes';
 import { closeScrapers } from '../services/scrape-service';
 import { AppError } from '../shared/errors';
 import { respondError } from '../shared/response';
@@ -43,6 +44,7 @@ export function createApp(): QualMatchApp {
   app.use(createQualificationRoutes(db));
   app.use(createCapLibRoutes(db));
   app.use(createSourceRoutes(db));
+  app.use(createSystemRoutes(db));
 
   // ── 生产期静态托管前端构建产物 ──
   // 开发期前端由 Vite dev server（5173）提供，/api 经 Vite proxy 转发到本服务，

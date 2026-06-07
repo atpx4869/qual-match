@@ -331,13 +331,17 @@ export class CapLibService {
     const fulls = [...fullSet];
     const bases = [...baseSet];
 
+    // 分块 IN 查询上限（SQLite 变量上限保险；全量清单 2 万+ 也安全）
+    const IN_CHUNK = 500;
+
     // 保年命中：std_code_norm IN (...)，同号跨领域取最高优先级状态
     const exactMap = new Map<string, { libStatus: LibStatus; remark: string; domain: string }>();
-    if (fulls.length > 0) {
-      const ph = fulls.map(() => '?').join(',');
+    for (let i = 0; i < fulls.length; i += IN_CHUNK) {
+      const chunk = fulls.slice(i, i + IN_CHUNK);
+      const ph = chunk.map(() => '?').join(',');
       const rows = this.db.prepare(`
         SELECT std_code_norm, lib_status, remark, domain FROM cap_lib WHERE std_code_norm IN (${ph})
-      `).all(...fulls) as Array<{ std_code_norm: string; lib_status: LibStatus; remark: string; domain: string }>;
+      `).all(...chunk) as Array<{ std_code_norm: string; lib_status: LibStatus; remark: string; domain: string }>;
       for (const r of rows) {
         const prev = exactMap.get(r.std_code_norm);
         if (!prev || libStatusPriority(r.lib_status) > libStatusPriority(prev.libStatus)) {
@@ -346,17 +350,21 @@ export class CapLibService {
       }
     }
 
-    // 剥年命中（只看 active 最新年版）
-    const seriesMap = new Map<string, { stdCode: string; domain: string }>();
-    if (bases.length > 0) {
-      const ph = bases.map(() => '?').join(',');
+    // 剥年命中（只看 active 最新年版）。分块后不能靠 SQL 全局排序取首条，
+    // 改为按 std_code_norm 跨块比较取最大（最新年版），保证与未分块时一致。
+    const seriesMap = new Map<string, { stdCode: string; domain: string; norm: string }>();
+    for (let i = 0; i < bases.length; i += IN_CHUNK) {
+      const chunk = bases.slice(i, i + IN_CHUNK);
+      const ph = chunk.map(() => '?').join(',');
       const rows = this.db.prepare(`
-        SELECT std_code_base, std_code, domain FROM cap_lib
+        SELECT std_code_base, std_code, std_code_norm, domain FROM cap_lib
         WHERE std_code_base IN (${ph}) AND lib_status = 'active'
-        ORDER BY std_code_norm DESC
-      `).all(...bases) as Array<{ std_code_base: string; std_code: string; domain: string }>;
+      `).all(...chunk) as Array<{ std_code_base: string; std_code: string; std_code_norm: string; domain: string }>;
       for (const r of rows) {
-        if (!seriesMap.has(r.std_code_base)) seriesMap.set(r.std_code_base, { stdCode: r.std_code, domain: r.domain });
+        const prev = seriesMap.get(r.std_code_base);
+        if (!prev || r.std_code_norm > prev.norm) {
+          seriesMap.set(r.std_code_base, { stdCode: r.std_code, domain: r.domain, norm: r.std_code_norm });
+        }
       }
     }
 

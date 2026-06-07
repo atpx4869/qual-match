@@ -16,6 +16,26 @@ export interface CnasPreset {
   labNo: string;
   note: string;
   syncedCount: number;
+  subscribed: boolean;
+}
+
+export type OrgSource = 'prov_cma' | 'cnas' | 'nat_cma';
+
+export interface SourceLab {
+  labName: string;
+  sourceRef: string;
+  region: string;
+  recordCount: number;
+  dataOrigin: string;
+  lastSyncAt: string | null;
+  syncStatus: string;
+  syncError: string | null;
+}
+
+export interface SourceOrgState {
+  source: OrgSource;
+  localCount: number;
+  lab: SourceLab | null;
 }
 
 // 复用 cap-lib 的 SyncProgress 类型（target/phase/current/total/error）
@@ -28,7 +48,19 @@ export function searchProvCma(q: string): Promise<{ items: ProvCmaSearchResult[]
 }
 
 export function syncProvCma(publicDetailId: string): Promise<{ jobId: string }> {
-  return apiPost('/api/sources/prov_cma/sync', { publicDetailId });
+  return apiPost('/api/sources/prov_cma/sync', publicDetailId ? { publicDetailId } : {});
+}
+
+export function syncSubscribedProvCma(): Promise<{ jobId: string }> {
+  return apiPost('/api/sources/prov_cma/sync', {});
+}
+
+export function subscribeProvCma(item: ProvCmaSearchResult): Promise<{ ok: boolean }> {
+  return apiPost('/api/sources/prov_cma/subscribe', {
+    publicDetailId: item.publicDetailId,
+    labName: item.sysName,
+    region: item.areaName,
+  });
 }
 
 export function listCnasPresets(): Promise<{ items: CnasPreset[] }> {
@@ -36,9 +68,21 @@ export function listCnasPresets(): Promise<{ items: CnasPreset[] }> {
 }
 
 export function syncCnas(labNo: string): Promise<{ jobId: string }> {
-  return apiPost('/api/sources/cnas/sync', { labNo });
+  return apiPost('/api/sources/cnas/sync', labNo ? { labNo } : {});
+}
+
+export function syncSubscribedCnas(): Promise<{ jobId: string }> {
+  return apiPost('/api/sources/cnas/sync', {});
+}
+
+export function subscribeCnas(labNo: string): Promise<{ ok: boolean }> {
+  return apiPost('/api/sources/cnas/subscribe', { labNo });
 }
 
 export function getSourceSyncProgress(jobId: string): Promise<SyncProgress> {
   return apiGet(`/api/sources/sync-progress/${encodeURIComponent(jobId)}`);
+}
+
+export function getSourceOrg(source: OrgSource): Promise<SourceOrgState> {
+  return apiGet(`/api/sources/${source}/orgs`);
 }

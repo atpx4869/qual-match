@@ -242,15 +242,12 @@
 <!-- ============ 设置 ============ -->
 <section class="view" data-view="settings">
   <h2 class="vtitle">页面 4 · 设置</h2>
-  <p class="vdesc">全局配置:库路径、各源同步并发、国家 CMA 抓取开关等。无多用户、无登录。</p>
+  <p class="vdesc">数据总览、CNAS 浏览器路径与抓取节流、全库备份下载。无多用户、无登录。</p>
   <div class="panel" style="padding:8px 24px 16px;max-width:760px">
-    <div class="form-row"><div class="lbl">数据库路径</div><div class="ctl"><span class="mono muted">./data/qual-match.db</span> <button class="btn sm" style="margin-left:8px">打开所在目录</button></div></div>
-    <div class="form-row"><div class="lbl">数据库大小</div><div class="ctl muted">28.6 MB · 资质明细 11,734 行 · 一单一库 9,320 行</div></div>
-    <div class="form-row"><div class="lbl">省级 CMA 同步并发</div><div class="ctl"><input class="input" style="width:80px" value="3"></div></div>
-    <div class="form-row"><div class="lbl">CNAS 页面池并发</div><div class="ctl"><input class="input" style="width:80px" value="3"> <span class="muted" style="font-size:12px;margin-left:8px">playwright 浏览器渲染,建议 ≤ 3</span></div></div>
-    <div class="form-row"><div class="lbl">国家 CMA 抓取</div><div class="ctl"><span class="switch"></span> <span class="muted" style="font-size:12px;margin-left:10px">开启后用滑块过码抓取;关闭则仅 Excel 导入</span></div></div>
-    <div class="form-row"><div class="lbl">国家 CMA 并发</div><div class="ctl"><input class="input" style="width:80px" value="1"> <span class="muted" style="font-size:12px;margin-left:8px">政府站点频控敏感,钉死低并发</span></div></div>
-    <div class="form-row"><div class="lbl">std_code 算法版本</div><div class="ctl"><span class="tag t-info mono">v3</span> <button class="btn sm" style="margin-left:8px">全量重算归一列</button></div></div>
+    <div class="form-row"><div class="lbl">数据总览</div><div class="ctl muted">省级 CMA 28,110 行 · CNAS 7,451 行 · 一单一库已同步领域</div></div>
+    <div class="form-row"><div class="lbl">CNAS 浏览器路径</div><div class="ctl"><input class="input" style="width:420px" value="C:/Program Files/Google/Chrome/Application/chrome.exe"></div></div>
+    <div class="form-row"><div class="lbl">CNAS 翻页节流</div><div class="ctl"><input class="input" style="width:90px" value="1500"> <span class="muted" style="font-size:12px;margin-left:8px">毫秒;每页再叠加随机等待</span></div></div>
+    <div class="form-row"><div class="lbl">全库备份</div><div class="ctl"><button class="btn primary">下载 SQLite 备份</button></div></div>
     <div class="form-row"><div class="lbl"></div><div class="ctl"><button class="btn primary">保存设置</button> <button class="btn">导出全库备份</button></div></div>
   </div>
 </section>

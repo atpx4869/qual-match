@@ -17,6 +17,21 @@ const pasteSchema = z.object({
   codes: z.array(z.string()).min(1, '至少一个标准号'),
 });
 
+const matchQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).optional().default(1),
+  pageSize: z.coerce.number().int().refine((v) => [200, 300, 500, 1000, 2000].includes(v), 'pageSize 必须是 200/300/500/1000/2000').optional().default(500),
+  filter: z.enum(['all', 'covered', 'uncovered']).optional().default('all'),
+  keyword: z.string().trim().optional().default(''),
+  // 排序：清单文本列（seq=原始导入顺序）
+  sortBy: z.enum(['seq', 'stdCode', 'stdName', 'controlledNo', 'department']).optional().default('seq'),
+  sortOrder: z.enum(['asc', 'desc']).optional().default('asc'),
+  // 各资质列状态筛选（可选；省略=不限）
+  provCmaState: z.enum(['covered', 'none', 'series']).optional(),
+  cnasState: z.enum(['covered', 'none', 'series']).optional(),
+  natCmaState: z.enum(['covered', 'none', 'series']).optional(),
+  capLibState: z.enum(['in_lib', 'cite_only', 'abolished', 'series_only', 'not_in_lib']).optional(),
+});
+
 export function createWatchlistRoutes(db: Database.Database): Router {
   const router = Router();
 
@@ -57,7 +72,10 @@ export function createWatchlistRoutes(db: Database.Database): Router {
       if (Number.isNaN(id)) throw new BadRequestError('无效的清单 id');
       const wl = db.prepare('SELECT id, name, created_at, matched_at, item_count FROM watchlists WHERE id = ?').get(id);
       if (!wl) throw new NotFoundError(`清单不存在：${id}`);
-      const items = db.prepare('SELECT std_code, std_name, seq FROM watchlist_items WHERE watchlist_id = ? ORDER BY seq').all(id);
+      const items = db.prepare(
+        `SELECT std_code, std_name, controlled_no, has_text, department, seq
+         FROM watchlist_items WHERE watchlist_id = ? ORDER BY seq`,
+      ).all(id);
       respond(res, toCamelCase({ ...wl, items }));
     } catch (e) { next(normalizeError(e)); }
   });
@@ -78,7 +96,8 @@ export function createWatchlistRoutes(db: Database.Database): Router {
     try {
       const id = parseInt(req.params.id, 10);
       if (Number.isNaN(id)) throw new BadRequestError('无效的清单 id');
-      const outcome = matchWatchlist(db, id);
+      const query = matchQuerySchema.parse(req.query);
+      const outcome = matchWatchlist(db, id, query);
       respond(res, outcome);
     } catch (e) { next(normalizeError(e)); }
   });

@@ -39,6 +39,7 @@ export function resetDbForTesting(): void {
 
 function migrate(db: Database.Database): void {
   db.exec(SCHEMA);
+  addWatchlistPassthroughColumns(db);
   renormalizeOnAlgoBump(db);
   seedSettings(db);
   seedCapLibDomains(db);
@@ -202,6 +203,9 @@ CREATE TABLE IF NOT EXISTS watchlist_items (
   std_code_norm TEXT NOT NULL DEFAULT '',
   std_code_base TEXT NOT NULL DEFAULT '',
   std_name      TEXT DEFAULT '',
+  controlled_no TEXT DEFAULT '',
+  has_text      TEXT DEFAULT '',
+  department    TEXT DEFAULT '',
   seq           INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_wl_items_wl   ON watchlist_items(watchlist_id);
@@ -225,6 +229,18 @@ CREATE TABLE IF NOT EXISTS sync_logs (
   error_message   TEXT
 );
 `;
+
+function addColumnIfMissing(db: Database.Database, table: string, column: string, definition: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (cols.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+function addWatchlistPassthroughColumns(db: Database.Database): void {
+  addColumnIfMissing(db, 'watchlist_items', 'controlled_no', "TEXT DEFAULT ''");
+  addColumnIfMissing(db, 'watchlist_items', 'has_text', "TEXT DEFAULT ''");
+  addColumnIfMissing(db, 'watchlist_items', 'department', "TEXT DEFAULT ''");
+}
 
 // ─── std_code 归一化版本回填 ───────────────────────────────────────────────────
 /**
