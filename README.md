@@ -30,7 +30,7 @@ qual-match/
 │   └── src/                 main.ts / App.vue / router.ts / pages/
 ├── data/                    运行时 SQLite 库（gitignored）
 ├── docs/DESIGN.md           设计文档（单一真相源）
-└── poc/                     国家 CMA 滑块破解 PoC（已止损，走导入降级，见 DESIGN §3.5）
+└── poc/                     国家 CMA 滑块抓取 PoC（已打通，见 DESIGN §3.5 / `nat_cma_online_scraper.py`）
 ```
 
 ## 开发起步
@@ -119,10 +119,13 @@ WAL 一致）；迁移时把下载的 `.db` 放回目标机 `data/qual-match.db`
   搜机构 → 抓取入库，**已联网验证 28110 条**；CNAS（playwright+JSL 反爬）搜机构 → 抓取入库，
   **已联网验证 7451 条**。两源均经匹配命中验证。
   （下载受限环境可设 `CNAS_CHROME_PATH` 用现成 Chrome，免下载 playwright 自带 chromium。）
-- [ ] 阶段 5 · 国家 CMA（滑块破解已止损 → 走 Excel 导入降级）
+- [x] **阶段 5 · 国家 CMA 在线抓取**：原滑块「止损」已翻案（2026-06-08）。滑块缺口直检（Sobel）
+  20/20 稳定 + 三层下钻（list 机构 → 场所 → formAbility 明细，提交带 finalX）+ 按场所遍历。
+  后端抓取器/service/路由已落地并联网验证（实测 5 场所 10955 条）。前端 tab 待补；Excel 导入降级仍保留。
+  （同 CNAS，下载受限环境可设 `NAT_CMA_CHROME_PATH` 用现成 Chrome。）
 - [x] **阶段 6 · 打磨**：设置页（数据总览 + CNAS 浏览器路径/节流可配 + 全库备份下载）、部署说明。
 
 **MVP = 阶段 0+1+2+3**：导入资质明细/清单 → 匹配 → 导出 + 综合查询 + 一单一库同步。
-当前 **阶段 0+1+2+3 已完成，MVP 闭环**：4 类资质源齐全（省级CMA/CNAS/国家CMA 靠 Excel 导入，
-一单一库自动同步），导入/同步 → 匹配 → 导出 + 综合查询全可用。省级CMA/CNAS 在线抓取（阶段 4）、
-国家 CMA（阶段 5）作为后续增强。
+当前 **阶段 0~6 已完成，超出 MVP**：4 类资质源齐全，一单一库自动同步，省级 CMA / CNAS / 国家 CMA
+均支持在线抓取并已联网验证（国家 CMA 后端已通、前端 tab 待补，Excel 导入降级仍保留）。
+导入/同步/抓取 → 匹配 → 导出 + 综合查询全可用。

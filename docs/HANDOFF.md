@@ -224,6 +224,7 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
 
 - `DESIGN.md` —— 完整设计（架构/数据模型/数据源/匹配引擎/前端/路线图），单一真相源
 - `README.md` —— 项目总览 + 起步
-- `poc/` —— 国家 CMA 在线复探/滑块 PoC（已止损，结论见 DESIGN §3.5；`nat_cma_online_probe.py`
-  可复跑在线入口，`gen_test_xlsx.cjs` 可生成测试数据）
+- `poc/` —— 国家 CMA 在线抓取 PoC（已打通，见 DESIGN §3.5）：`nat_cma_online_scraper.py`
+  完整三层抓取链（含滑块自测 --self-test），`nat_cma_online_probe.py` 早期复探，
+  `gen_test_xlsx.cjs` 生成测试数据
 - bzxz 项目（`../bzxz`）—— 移植来源，阶段 3/4 抓取器在其 `src/services` 下
