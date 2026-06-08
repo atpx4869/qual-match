@@ -459,7 +459,18 @@ insert.run(target, stdCode, norm, base, /* ...其余字段 */);
 - 设置页提供 `nat_cma_scrape_enabled` 开关、国家 CMA 浏览器路径和节流设置；默认关闭，用户确认后启用。
 - Excel 导入降级仍保留，导入明细与在线抓取一样参与主匹配、综合查询和导出。
 
-**机构标识**：`cert_number`。单机构定位下，导入明细仍写入 `SELF_ORG_ID='_self'`。
+**机构标识**：`cert_number`。单机构定位下，导入/抓取明细仍写入 `SELF_ORG_ID='_self'`。
+国家 CMA 在线抓取的真实远端定位保存在 `nat_cma_labs.source_ref` JSON 中：
+`{ placeId, applyId, certCode, orgName, seeds[] }`。其中 `seeds[]` 是用户订阅的场所列表。
+明细表 `nat_cma_qualifications` 额外写入 `apply_id/place_id`，用于区分单机构下不同场所；
+前端“已订阅场所本地条数”优先按 `place_id` 聚合，避免同名场所串数。
+
+**2026-06-08 分页复测结论（冷却策略已验证）**：
+
+- `formAbility` 明细页实际只接受 `pageSize=30`；传 50/100/200 等会返回空页。
+- HAR 复核确认：官网 `formAbility` 明细页短时间连续抓约 4 个新页后，会进入 400“参数有误,服务器无法解析”冷却窗口；第 5/10 页不是坏页，等待约 20-30 秒后可继续成功获取。
+- 后端抓取器已按冷却机制处理：每 4 个新页主动等待 30 秒；若仍遇到参数错误页，则 `back` 回上一成功页、等待 30 秒、重试同一个 `pageNo`（最多 3 次）。
+- 在线限量验证：湖北省产品质量监督检验研究院第一个场所 `maxPagesPerPlace=11` 成功抓到 330 条，已越过旧的 4 页/120 条限制。全量 5 场所耗时较长，产品仍保留 Excel 导入降级路径。
 
 ### 3.6 一单一库（移植 bzxz `cap-lib-service.ts`）
 

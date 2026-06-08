@@ -82,10 +82,11 @@ npm --prefix web install
 # 2. 构建前端 → web/dist/（后端启动时若检测到该目录即静态托管 + SPA fallback）
 npm run web:build
 
-# 3.（仅用 CNAS 在线抓取时）装 playwright 浏览器内核
+# 3.（仅用 CNAS / 国家 CMA 在线抓取时）装 playwright 浏览器内核
 npx playwright install chromium
-#   下载受限环境改用现成 Chrome：设置页填「浏览器路径」或设环境变量 CNAS_CHROME_PATH
-#   指向现成 chrome.exe（如 C:/Program Files/Google/Chrome/Application/chrome.exe）。
+#   下载受限环境改用现成 Chrome：设置页填「浏览器路径」或设环境变量
+#   CNAS_CHROME_PATH / NAT_CMA_CHROME_PATH 指向现成 chrome.exe
+#   （如 C:/Program Files/Google/Chrome/Application/chrome.exe）。
 
 # 4. 起服务（默认 3000；编译产物方式见「常用命令」的 build/start）
 npm run dev
@@ -120,10 +121,11 @@ WAL 一致）；迁移时把下载的 `.db` 放回目标机 `data/qual-match.db`
   **已联网验证 7451 条**。两源均经匹配命中验证。
   （下载受限环境可设 `CNAS_CHROME_PATH` 用现成 Chrome，免下载 playwright 自带 chromium。）
 - [x] **阶段 5 · 国家 CMA 在线抓取**：原滑块「止损」已翻案（2026-06-08）。滑块缺口直检（Sobel）
-  20/20 稳定 + 三层下钻（list 机构 → 场所 → formAbility 明细，提交带 finalX）+ 按场所遍历。
-  后端抓取器/service/路由已落地并联网验证（实测 5 场所 10955 条）；前端国家 CMA tab 已接入
-  机构搜索 → 场所列表弹窗 → 场所订阅 → 同步/进度。
-  Excel 导入降级仍保留。
+  稳定 + 三层下钻（list 机构 → 场所 → form 父页 → iframe formAbility 明细）+ 按场所订阅遍历。
+  HAR 证实官网 `formAbility` 短时间连续抓约 4 个新页后会进入 400“参数有误”冷却窗口；抓取器已按
+  `pageSize=30`、4 页一组主动冷却 30 秒、参数错误后 back+冷却+重试同页处理。
+  已联网限量验证：湖北省产品质量监督检验研究院第一个场所 `maxPagesPerPlace=11` 成功抓到 330 条，
+  突破旧的 4 页/120 条限制。全量 5 场所耗时较长，建议后台同步并关注进度提示；Excel 导入降级仍保留。
   （同 CNAS，下载受限环境可设 `NAT_CMA_CHROME_PATH` 用现成 Chrome。）
 - [x] **阶段 6 · 打磨**：设置页（数据总览 + CNAS/国家 CMA 浏览器路径/节流可配 + 国家 CMA 开关 + 全库备份下载）、部署说明。
 

@@ -2,7 +2,7 @@
 
 > **下次继续开发先读这份。** 它让你（或新的开发会话）快速恢复上下文、跑起项目、接着干。
 > 单一真相源是 [`DESIGN.md`](DESIGN.md)（完整设计 6 节）；本文件是「当前到哪了 + 怎么接着走」。
-> 最后更新：2026-06-07（阶段 6 ✅ 完成 —— 设置页 / 部署说明 / 全库备份已落地；后端 65 个单测 + 前后端类型检查通过）。
+> 最后更新：2026-06-08（国家 CMA 多场所在线抓取复测 —— 场所级链路打通；HAR 确认 formAbility 分页存在 4 页左右冷却窗口，已按 4 页一组冷却处理）。
 
 ---
 
@@ -27,7 +27,7 @@
 | 2 综合查询 | ✅ 完成 | 独立于清单，对本地资质库做关键词/标准号查询（行级+聚合双视图、源过滤、导出） |
 | 3 一单一库同步 | ✅ 完成 | 移植 bzxz cap-lib，领域订阅+同步（hash diff+soft delete）+ 匹配引擎 5 档比对。**MVP 闭环** |
 | **4 省级CMA+CNAS抓取** | ✅ 完成 | 省级CMA(HTTP) 28110条 + CNAS(playwright) 7451条 **均已联网验证入库+匹配命中** |
-| 5 国家 CMA | ✅ 在线抓取已打通 | 2026-06-08 攻克：滑块缺口直检(Sobel)20/20稳定 + 三层下钻(list机构→场所→formAbility明细)+ finalX 参数。后端抓取器/service/路由已落地并联网验证(湖北省产品质量监督检验研究院 5 场所 10955 条)。前端 tab 待补；Excel 导入降级仍保留。见 DESIGN §3.5 / `poc/nat_cma_online_scraper.py` / `src/sources/nat-cma/` |
+| 5 国家 CMA | ⚠️ 场所级链路已打通，分页冷却策略已验证 | 2026-06-08 复测：滑块 Sobel 解法稳定；list→场所→formAbility 明细链路可用；同一机构 5 个场所可列出，能力行可带 `apply_id/place_id` 入库。HAR 证实官网 `formAbility` 短时间连续抓约 4 个新页后会进入 400“参数有误”冷却窗口，等待约 20-30 秒后可继续；代码已改为 `pageSize=30`、4 页一组主动冷却、参数错误后 back+冷却+重试同页。Excel 导入降级仍保留。 |
 | **6 打磨** | ✅ 完成 | 设置页（数据总览 + CNAS 设置 + 全库备份）、部署说明、分页/筛选/错误提示打磨 |
 
 ---
@@ -45,7 +45,7 @@ npm run web:dev             # 前端，5173，/api 经 Vite proxy 转发到 3000
 # 浏览器开 http://localhost:5173
 
 # 验证
-npm test                    # 后端单测（vitest，65 个）
+npm test                    # 后端单测（vitest，71 个）
 npm run web:typecheck       # 前端类型检查
 npx tsc -p tsconfig.json --noEmit   # 后端类型检查
 ```
@@ -82,15 +82,16 @@ src/                        后端（CommonJS，tsx 跑 / tsc 编译）
 │   ├── cap-lib-service.ts   ★ 一单一库：startSync/runSync(RuoYi分页+hash diff+soft delete)/batchStatus(5档)
 │   ├── cap-lib-service.test.ts
 │   ├── sync-progress.ts     ★ 公共进度 store + 串行队列 + makeJobId（cap-lib / scrape 共用）
-│   ├── scrape-service.ts    ★ 抓取入库编排：startProvCmaSync/startCnasSync/searchProvCmaLabs/listCnasPresets
-│   ├── scrape-service.test.ts  抓取器解析单测（CMA cheerio / CNAS parseUrl，不打网络）
+│   ├── scrape-service.ts    ★ 抓取入库编排：省级 CMA / CNAS / 国家 CMA 搜索、订阅、同步、场所计数
+│   ├── scrape-service.test.ts  抓取器解析 + 国家 CMA 多场所订阅/计数单测（不打网络）
 │   ├── system-service.ts    ★ 阶段6：数据总览 + CNAS 设置 + SQLite online backup
 │   ├── system-service.test.ts
 │   └── export-service.ts   exportMatchResult + exportQualificationSearch → xlsx buffer
 ├── sources/                 抓取器（阶段 4，从 bzxz 移植）
 │   ├── prov-cma/cma-scraper.ts  省级CMA HTTP+cheerio（search/scrapeFull，删 checkForUpdate）
 │   ├── cnas/cnas-scraper.ts     CNAS playwright+JSL反爬（fetchCapabilities/parseUrl，自带chromium）
-│   └── cnas/preset-cnas-labs.ts 内置 1 机构 L0290（本机构）
+│   ├── cnas/preset-cnas-labs.ts 内置 1 机构 L0290（本机构）
+│   └── nat-cma/nat-cma-scraper.ts  国家 CMA playwright + 页内 canvas Sobel + 场所级 formAbility 分页
 ├── api/
 │   ├── app.ts              Express 装配 + 全局错误中间件（4参!）+ SPA fallback + multer错误
 │   ├── health-routes.ts    GET /api/health
@@ -98,7 +99,7 @@ src/                        后端（CommonJS，tsx 跑 / tsc 编译）
 │   ├── qualification-routes.ts 综合查询：GET search / by-standard，POST export
 │   ├── import-routes.ts    POST /api/import/qualifications
 │   ├── cap-lib-routes.ts   一单一库：GET domains / PUT subscribe / POST sync / GET sync-progress / POST cleanup
-│   ├── source-routes.ts    抓取：prov_cma/search·sync、cnas/presets·sync、sync-progress、:source/orgs（去auth）
+│   ├── source-routes.ts    抓取：prov_cma / cnas / nat_cma 搜索·订阅·同步·场所列表·进度（去auth）
 │   └── system-routes.ts    阶段6：overview/settings/backup
 └── index.ts                启动入口
 
@@ -107,11 +108,11 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
 ├── api/watchlist.ts        类型(MatchResult含capLib) + API 函数
 ├── api/qualification.ts    类型(QualSearchRow/QualStandardGroup) + 综合查询 API + SOURCE_LABEL
 ├── api/cap-lib.ts          类型(DomainMeta/SyncProgress/CapLibStatus) + 一单一库 API
-├── api/sources.ts          类型(ProvCmaSearchResult/CnasPreset) + 省级CMA/CNAS 抓取 API
+├── api/sources.ts          类型(ProvCmaSearchResult/CnasPreset/NatCma*) + 三类机构型源抓取 API
 ├── api/system.ts           阶段6：设置页 API（overview/settings/backup）
 ├── pages/MatchPage.vue     ★ 清单匹配主页（已实做，含一单一库第5列 + 服务端分页/排序/列筛选）
 ├── pages/SearchPage.vue    ★ 综合查询主页（已实做，行级+聚合双视图）
-├── pages/SourcesPage.vue   ★ 资质管理（一单一库 + 省级CMA + CNAS tab 实做；国家CMA 占位）
+├── pages/SourcesPage.vue   ★ 资质管理（一单一库 + 省级CMA + CNAS + 国家CMA 场所选择/订阅 tab）
 ├── pages/SettingsPage.vue  ★ 设置页（数据总览 + CNAS 浏览器/节流设置 + 全库备份）
 ├── components/CoverageTag.vue / CapLibStatusTag.vue（5档色板）/ SyncProgress.vue / QualImportDialog.vue
 ├── App.vue / router.ts / main.ts
@@ -178,10 +179,10 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
 - `web/src/pages/SettingsPage.vue` + `web/src/api/system.ts`：设置页替换 `PlaceholderPage`，路由和侧边栏已接入。
 - `README.md`：补齐生产部署说明、Playwright/Chrome 退路、备份与运行参数说明。
 - `MatchPage.vue` / `match-service.ts`：清单匹配支持服务端分页、排序、关键词筛选、资质列状态筛选。
-- 验证：`npm test`（7 个测试文件 / 68 个用例）、`npx tsc -p tsconfig.json --noEmit`、`npm run web:typecheck` 均通过。
+- 验证：`npm test`（7 个测试文件 / 71 个用例）、`npx tsc -p tsconfig.json --noEmit`、`npm run web:typecheck` 均通过。
 
 剩余只有可选项：
-- **国家 CMA 在线抓取（2026-06-08 已打通 ✅，原止损翻案）**：
+- **国家 CMA 在线抓取（2026-06-08 场所级链路已打通，分页冷却策略已验证 ⚠️）**：
   - **滑块**：原判断「命中率不稳」是错的。真因是当年用模板匹配(ddddocr/cv2)，结果偏右约 22px。
     正解是**缺口直检**：对背景图缺口行带(y..y+45)做垂直 Sobel，找相距一个滑块宽(45px)的两条
     竖边，左边那条 = 缺口左缘 = moveX。实测 20/20 稳定。
@@ -189,17 +190,54 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
     (除了 captchaVerify)。三层下钻：list(机构,含 placeId/applyId) → formAbility 场所表(每场所 placeId)
     → formAbility(按场所抓明细,分页)。资质**按场所分**，一个机构遍历所有场所。
   - **已落地**：`src/sources/nat-cma/nat-cma-scraper.ts`(playwright+页内 canvas Sobel+fetch)、
-    scrape-service 的 `searchNatCmaOrgs/subscribeNatCmaLab/startNatCmaSync`、source-routes 的
-    `/api/sources/nat_cma/search·subscribe·sync`。后端类型检查 + 65 单测通过；联网验证
-    (湖北省产品质量监督检验研究院 5 场所合计 10955 条，标准号正确)。
+    scrape-service 的 `searchNatCmaOrgs/listNatCmaPlaces/subscribeNatCmaLab/startNatCmaSync/listSubscribedNatCmaPlaces`、
+    source-routes 的 `/api/sources/nat_cma/search·places·subscribe·sync·places/subscribed`。
+  - **2026-06-08 本轮修复**：国家 CMA 明细入库现在写 `apply_id/place_id`；已订阅场所本地条数优先按
+    `place_id` 聚合，避免同名场所串数；新增多场所订阅/计数单测。
   - **前端已补**：SourcesPage 的「国家 CMA」tab 已支持搜机构→弹出场所列表→勾选场所订阅→抓取→进度；
     api/sources.ts 已有对应函数。订阅粒度是场所，不是机构行；同步只抓已订阅场所，避免多地点机构漏抓或误抓。
     设置页已接入 `nat_cma_scrape_enabled` 开关、国家 CMA 浏览器路径和节流设置（默认关闭，需用户确认开启）。
     浏览器退路：可设 `NAT_CMA_CHROME_PATH` 指向系统 Chrome
     (`C:/Program Files/Google/Chrome/Application/chrome.exe`)，或 `npx playwright install chromium`；
     留空时回退 CNAS 浏览器设置/本机浏览器探测。全量抓取规模大(单机构上万条)，scrapeOrg 支持 `maxPagesPerPlace` 限量。
-  - PoC 完整可跑脚本：`poc/nat_cma_online_scraper.py`(Python 版,含滑块自测 --self-test)。
+  - **联网复测记录**：
+    - 搜「湖北省产品质量监督检验研究院」→ 1 个候选，证书号 `230020349767`。
+    - `listPlaces` 返回 5 个场所：饮料粮油、节能建材、饮料粮油监督、太阳能热水器、金刚石工具。
+    - 受控抓前 2 个场所各第 1 页：共 60 条，两个 `placeId` 各 30 条，能力行包含 `applyId/placeId/placeName/placeAddress`。
+    - 第 5 个场所单独抓 3 页正常：远端声明总数 676，取到 90 条。
+    - 完整服务同步曾暴露 bug：`ensureSelfLab` 把 `source_ref` JSON 覆盖成证书号，导致场所订阅丢失；已修为同步后保留 JSON。
+    - HAR 复核确认：官网 `formAbility` 明细页短时间连续抓约 4 个新页后，会进入 400“参数有误,服务器无法解析”冷却窗口；`pageNo=5/10` 本身不是坏页，等待约 20-30 秒后可继续成功获取。
+    - 代码已按冷却机制处理：固定 `pageSize=30`；每 4 个新页主动等待 30 秒；若仍遇到参数错误页，则浏览器 `back` 回上一成功页、等待 30 秒、重试同一个 `pageNo`（最多 3 次），避免把 400 当作分页终止。
+    - 在线限量验证：第一个场所 `maxPagesPerPlace=11` 成功抓到 330 条，已越过旧的 4 页/120 条限制；全量 5 场所耗时会较长，生产同步需保留进度提示和可中断预期。
+  - PoC 完整可跑脚本：`poc/nat_cma_online_scraper.py`(Python 版,含滑块自测 --self-test)。本轮还用内联
+    `npx tsx -` 脚本做了在线验证；未保存为文件。
 - **发布前验收**：真实 UI 冒烟一次（导入清单→匹配→导出、设置页备份下载、CNAS 配置保存）。
+
+### 2026-06-08 换电脑续接重点
+
+当前工作区有 3 个未提交源码改动，都是国家 CMA 多场所/分页相关：
+- `src/sources/nat-cma/nat-cma-scraper.ts`
+  - `NatCmaCapability` 补 `applyId/placeId`。
+  - 明细分页 `pageSize` 改为 30。
+  - 尝试每 4 页刷新场所页、异常页重试、按远端总页数继续探测。
+  - `page.goto` 超时放宽到 60s。
+- `src/services/scrape-service.ts`
+  - `nat_cma` 入库写 `apply_id/place_id`。
+  - 同步完成后 `source_ref` 保留多场所 JSON，不再覆盖成证书号。
+  - 已订阅场所条数优先按 `place_id` 聚合，旧数据再回退 `test_object=placeName`。
+- `src/services/scrape-service.test.ts`
+  - 新增同名不同 `placeId` 不合并、按 `place_id` 计数两条单测。
+
+本轮验证命令已跑过：
+- `npm test` → 7 文件 / 71 用例通过。
+- `npx tsc -p tsconfig.json --noEmit` → 通过。
+- `npm run web:typecheck` → 通过。
+- `git diff --check` → 通过。
+
+本轮创建过数据库快照：`data/qual-match-before-nat-cma-full-sync-2026-06-08T12-29-08-593Z.db`。
+随后跑过一次国家 CMA 服务同步，当前本机 `data/qual-match.db` 里可能已有一轮不完整的国家 CMA 数据
+（当时只入了第一个场所 120 条）。如果继续全量验证，建议先用 UI 的“删除本地资质”清掉国家 CMA，
+或从上述快照恢复，再重新同步。
 
 > 端口残留：tsx 在 Windows 杀不净，重启前清 3000（见第三节）。playwright 还会留 chrome 进程，
 > 抓取后 `taskkill //F //IM chrome.exe`。

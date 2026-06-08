@@ -1,4 +1,4 @@
-import type { Browser, Page } from 'playwright';
+import type { Browser, Frame, Page } from 'playwright';
 
 /**
  * 国家 CMA 抓取器（cma.cnca.cn，playwright + 页内 fetch/canvas）。
@@ -68,6 +68,8 @@ export interface NatCmaCapability {
   stdName: string;      // 标准名称
   stdCodeRaw: string;   // 标准编号（末尾可能粘连「是否食品」列，交由 cleanStdCode 归一）
   isFood: string;
+  applyId: string;
+  placeId: string;
   placeName: string;
   placeAddress: string;
 }
@@ -123,7 +125,7 @@ export class NatCmaScraper {
       try { await context.close(); } catch { /* best effort */ }
     };
     try {
-      await page.goto(`${NAT_CMA_BASE}/solr/tBzAbilitySearch/list`, { timeout: 30_000, waitUntil: 'domcontentloaded' });
+      await page.goto(`${NAT_CMA_BASE}/solr/tBzAbilitySearch/list`, { timeout: 60_000, waitUntil: 'domcontentloaded' });
       return { page, release };
     } catch (err) {
       await release();
@@ -212,41 +214,69 @@ export class NatCmaScraper {
       const capabilities: NatCmaCapability[] = [];
       let grandTotal = 0;
 
-      // 先探每个场所总数（第 1 页），累加为 grandTotal
+      // 先探每个场所总数（第 1 页），累加为 grandTotal。
+      // HAR 复核：formAbility 每短时间连续抓约 4 个新页后会进入 400“参数有误”冷却窗口；
+      // 因此生产抓取按 4 页一组主动冷却，若仍遇到参数错误则等待后重试同一页。
       for (const p of places) {
-        const first = (await page.evaluate(async (args) => {
-          // @ts-expect-error 注入的页内 helper
-          return await window.__natcma_fetchPlacePage(args.placeId, args.applyId, args.pageNo, args.pageSize);
-        }, { placeId: p.placeId, applyId: applyByPlace.get(p.placeId) ?? org.applyId, pageNo: 1, pageSize: 50 })) as {
-          total: number; rows: Array<Omit<NatCmaCapability, 'placeName' | 'placeAddress'>>;
-        };
+        const pageSize = 30;
+        const cooldownMs = 30_000;
+        const pagesPerBurst = 4;
+        const maxRecoveriesPerPage = 3;
+        const applyId = applyByPlace.get(p.placeId) ?? org.applyId;
+        await openNatCmaFormPage(page, org.placeId || p.placeId, org.applyId || applyId);
+
+        const first = await fetchPlacePageViaIframe(page, p.placeId, 1, pageSize);
+        if (first.paramError) throw new Error(`国家 CMA ${p.placeName} 第 1 页触发参数错误`);
         grandTotal += first.total || 0;
         for (const r of first.rows) {
-          capabilities.push({ ...r, placeName: p.placeName, placeAddress: p.placeAddress });
+          capabilities.push({ ...r, applyId, placeId: p.placeId, placeName: p.placeName, placeAddress: p.placeAddress });
         }
         onProgress?.(capabilities.length, grandTotal, p.placeName);
         await sleep(throttle + Math.random() * 800);
 
-        // 剩余页：国家 CMA 页面里的“共 N 条”可能被截断成 120，不能用它作为停止条件。
-        // 继续翻页直到空页、重复页，或用户显式设置 maxPagesPerPlace。
-        const pageSize = 50;
         const seenPageSignatures = new Set<string>();
         seenPageSignatures.add(pageSignature(first.rows));
-        const hardPageLimit = maxPages > 0 ? maxPages : 500;
+        const expectedPages = first.total > pageSize ? Math.ceil(first.total / pageSize) : 0;
+        const hardPageLimit = maxPages > 0 ? maxPages : (expectedPages || 500);
+        const canTrustPageLimit = expectedPages > 0;
+        let consecutiveMisses = 0;
+        let pagesSinceCooldown = 1;
         for (let pageNo = 2; pageNo <= hardPageLimit; pageNo++) {
-          const more = (await page.evaluate(async (args) => {
-            // @ts-expect-error 注入的页内 helper
-            return await window.__natcma_fetchPlacePage(args.placeId, args.applyId, args.pageNo, args.pageSize);
-          }, { placeId: p.placeId, applyId: applyByPlace.get(p.placeId) ?? org.applyId, pageNo, pageSize })) as {
-            total: number; rows: Array<Omit<NatCmaCapability, 'placeName' | 'placeAddress'>>;
-          };
-          if (!more.rows.length) break;
+          if (pagesSinceCooldown >= pagesPerBurst) {
+            await sleep(cooldownMs);
+            pagesSinceCooldown = 0;
+          }
+
+          let recoveries = 0;
+          let more: NatCmaPageResult;
+          while (true) {
+            more = await fetchPlacePageViaIframe(page, p.placeId, pageNo, pageSize);
+            if (!more.paramError) break;
+            recoveries += 1;
+            if (recoveries > maxRecoveriesPerPage) {
+              throw new Error(`国家 CMA ${p.placeName} 第 ${pageNo} 页连续触发参数错误`);
+            }
+            await recoverFromParamError(page, cooldownMs);
+            pagesSinceCooldown = 0;
+          }
+
+          if (!more.rows.length) {
+            consecutiveMisses += 1;
+            if (!canTrustPageLimit && consecutiveMisses >= 3) break;
+            continue;
+          }
           const sig = pageSignature(more.rows);
-          if (seenPageSignatures.has(sig)) break;
+          if (seenPageSignatures.has(sig)) {
+            consecutiveMisses += 1;
+            if (!canTrustPageLimit && consecutiveMisses >= 3) break;
+            continue;
+          }
+          consecutiveMisses = 0;
           seenPageSignatures.add(sig);
           for (const r of more.rows) {
-            capabilities.push({ ...r, placeName: p.placeName, placeAddress: p.placeAddress });
+            capabilities.push({ ...r, applyId, placeId: p.placeId, placeName: p.placeName, placeAddress: p.placeAddress });
           }
+          pagesSinceCooldown += 1;
           if (capabilities.length > grandTotal) grandTotal = capabilities.length;
           onProgress?.(capabilities.length, grandTotal, p.placeName);
           await sleep(throttle + Math.random() * 800);
@@ -260,12 +290,144 @@ export class NatCmaScraper {
   }
 }
 
+type NatCmaRawCapability = Omit<NatCmaCapability, 'applyId' | 'placeId' | 'placeName' | 'placeAddress'>;
+type NatCmaPageResult = { total: number; rows: NatCmaRawCapability[]; paramError: boolean };
+
+async function openNatCmaFormPage(page: Page, placeId: string, applyId: string): Promise<void> {
+  await page.addScriptTag({ content: PAGE_HELPERS });
+  const finalX = await page.evaluate(async () => {
+    // @ts-expect-error 注入的页内 helper
+    return await window.__natcma_passSlider();
+  });
+  if (finalX === null || finalX === undefined) throw new Error('form 父页滑块未通过');
+  const qs = new URLSearchParams({ placeId, applyId, flag: '1', finalX: String(finalX) });
+  await page.goto(`${NAT_CMA_BASE}/solr/tBzAbilitySearch/form?${qs}`, {
+    timeout: 60_000,
+    waitUntil: 'domcontentloaded',
+  });
+  await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+  await page.waitForTimeout(800);
+}
+
+async function findAbilityFrame(page: Page): Promise<Frame> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (page.url().includes('/solr/tBzAbilitySearch/formAbility')) return page.mainFrame();
+    const frame = page.frames().find((f) => f.url().includes('/solr/tBzAbilitySearch/formAbility'));
+    if (frame) return frame;
+    await page.waitForTimeout(300);
+  }
+  throw new Error('未找到国家 CMA formAbility iframe');
+}
+
+async function waitForAbilitySearchForm(frame: Frame): Promise<boolean> {
+  try {
+    await frame.waitForSelector('#searchForm', { timeout: 10_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isParamErrorPage(frame: Frame): Promise<boolean> {
+  try {
+    const text = await frame.locator('body').innerText({ timeout: 3_000 });
+    return /参数有误|服务器无法解析|请求出错/.test(text);
+  } catch {
+    return false;
+  }
+}
+
+async function recoverFromParamError(page: Page, cooldownMs: number): Promise<void> {
+  await page.goBack({ waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => undefined);
+  await sleep(cooldownMs);
+  const frame = await findAbilityFrame(page);
+  await waitForAbilitySearchForm(frame);
+}
+
+async function fetchPlacePageViaIframe(
+  page: Page,
+  placeId: string,
+  pageNo: number,
+  pageSize: number,
+): Promise<NatCmaPageResult> {
+  const frame = await findAbilityFrame(page);
+  const hasSearchForm = await waitForAbilitySearchForm(frame);
+  if (!hasSearchForm && await isParamErrorPage(frame)) return { total: 0, rows: [], paramError: true };
+  if (!hasSearchForm) throw new Error('国家 CMA formAbility iframe 缺少 searchForm');
+  await frame.addScriptTag({ content: PAGE_HELPERS }).catch(() => undefined);
+  const script = `
+    (async () => {
+      var targetPlaceId = ${JSON.stringify(placeId)};
+      var targetPageNo = ${JSON.stringify(String(pageNo))};
+      var targetPageSize = ${JSON.stringify(String(pageSize))};
+      var form = document.querySelector('#searchForm');
+      if (!form) throw new Error('missing searchForm');
+      var pageNoEl = document.querySelector('#pageNo');
+      var pageSizeEl = document.querySelector('#pageSize');
+      if (pageNoEl) pageNoEl.value = targetPageNo;
+      if (pageSizeEl) pageSizeEl.value = targetPageSize;
+      var placeEl = form.querySelector('[name="placeId"]');
+      if (placeEl) placeEl.value = targetPlaceId;
+      var finalXEl = form.querySelector('[name="finalX"]');
+      if (!finalXEl) {
+        finalXEl = document.createElement('input');
+        finalXEl.type = 'hidden';
+        finalXEl.name = 'finalX';
+        finalXEl.id = 'finalX';
+        form.appendChild(finalXEl);
+      }
+      var fx = await window.__natcma_passSlider();
+      if (fx === null || fx === undefined) throw new Error('formAbility 表单滑块未通过');
+      finalXEl.value = String(fx);
+      HTMLFormElement.prototype.submit.call(form);
+    })()
+  `;
+  const nav = frame.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => undefined);
+  await frame.evaluate(script);
+  await nav;
+  await page.waitForTimeout(1_000);
+  const nextFrame = await findAbilityFrame(page);
+  if (await isParamErrorPage(nextFrame)) return { total: 0, rows: [], paramError: true };
+  await waitForAbilitySearchForm(nextFrame);
+  const parsed = await parseFrameCapabilities(nextFrame);
+  return { ...parsed, paramError: false };
+}
+
+async function parseFrameCapabilities(frame: Frame): Promise<{ total: number; rows: NatCmaRawCapability[] }> {
+  return await frame.evaluate(`(() => {
+    const clean = (s) => {
+      const t = document.createElement('div');
+      t.innerHTML = s;
+      return (t.textContent || '').replace(/ /g, ' ').replace(/\\s+/g, ' ').trim();
+    };
+    const html = document.documentElement ? document.documentElement.innerHTML : '';
+    const totalM = html.match(/共\\s*(\\d+)\\s*条/);
+    const total = totalM ? parseInt(totalM[1], 10) : 0;
+    const tbodies = document.querySelectorAll('tbody');
+    const detail = tbodies.length >= 2 ? tbodies[1] : tbodies[0];
+    const rows = [];
+    if (detail) {
+      detail.querySelectorAll('tr').forEach((tr) => {
+        const c = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerHTML));
+        if (c.length >= 6) {
+          rows.push({
+            category: c[1], subCategory: c[2], testParam: c[3],
+            stdName: c[4], stdCodeRaw: c[5], isFood: c[6] || '',
+          });
+        }
+      });
+    }
+    return { total, rows };
+  })()`) as { total: number; rows: NatCmaRawCapability[] };
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function pageSignature(rows: Array<Pick<NatCmaCapability, 'stdCodeRaw' | 'stdName' | 'testParam'>>): string {
-  return rows.map((r) => `${r.stdCodeRaw}|${r.stdName}|${r.testParam}`).join('\n');
+function pageSignature(rows: NatCmaRawCapability[]): string {
+  return rows.map((r) => `${r.category}|${r.subCategory}|${r.testParam}|${r.stdName}|${r.stdCodeRaw}|${r.isFood}`).join('\n');
 }
 
 /**
@@ -327,6 +489,7 @@ const PAGE_HELPERS = `
     }
     return null;
   }
+  window.__natcma_passSlider = passSlider;
 
   function clean(s) {
     var t = document.createElement('div'); t.innerHTML = s;
@@ -408,7 +571,8 @@ const PAGE_HELPERS = `
     return out;
   };
 
-  // 第 3 层：按场所 placeId 抓一页资质明细（明细在 tbody[1]）
+  // 第 3 层：按场所 placeId 抓一页资质明细（明细在 tbody[1]）。保留给诊断脚本使用；
+  // 生产抓全量走 iframe 内真实 form/page(n,s) 流程，避免第 5 页附近 400。
   window.__natcma_fetchPlacePage = async function (placeId, applyId, pageNo, pageSize) {
     var fx = await passSlider();
     if (fx === null) throw new Error('formAbility 明细页滑块未通过');

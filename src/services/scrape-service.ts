@@ -157,6 +157,7 @@ async function ingest(
     'effective_date', 'expiry_date', 'category', 'sub_category',
     'test_object', 'test_param', 'test_standard', 'limit_desc',
   ];
+  if (source === 'nat_cma') cols.push('apply_id', 'place_id');
   const placeholders = cols.map(() => '?').join(', ');
   const insert = db.prepare(`INSERT INTO ${meta.qualTable} (${cols.join(', ')}) VALUES (${placeholders})`);
 
@@ -166,11 +167,13 @@ async function ingest(
     if (!clean) return null;
     const norm = extractFullCode(clean);
     if (!norm) return null;
-    return [
+    const vals = [
       SELF_ORG_ID, clean, norm, extractBaseCode(clean), r.stdName ?? '',
       r.effectiveDate ?? '', r.expiryDate ?? '', r.category ?? '', r.subCategory ?? '',
       r.testObject ?? '', r.testParam ?? '', r.testStandard ?? '', r.limitDesc ?? '',
     ];
+    if (source === 'nat_cma') vals.push(r.applyId ?? '', r.placeId ?? '');
+    return vals;
   }).filter((x): x is string[] => x !== null);
 
   // replace：清掉本机构旧明细，分块插入
@@ -365,13 +368,9 @@ export interface NatCmaSubscribeInput {
 /** 订阅国家 CMA 机构：把机构标识(placeId/applyId/orgName)写入 labs 的 source_ref(JSON)。 */
 export function subscribeNatCmaLab(db: Database.Database, input: NatCmaSubscribeInput): void {
   const count = countLocalRows(db, 'nat_cma');
-  const sourceRef = JSON.stringify({
-    placeId: input.placeId, applyId: input.applyId, certCode: input.certCode, orgName: input.orgName,
-    seeds: normalizeNatCmaSeeds(input),
-  });
   upsertLabRow(db, 'nat_cma', {
     labName: input.orgName,
-    sourceRef,
+    sourceRef: makeNatCmaSourceRef(input),
     region: input.region ?? '',
     recordCount: count,
     dataOrigin: count > 0 ? 'scraped' : 'subscribed',
@@ -403,20 +402,27 @@ export interface NatCmaPlaceState {
 export function listSubscribedNatCmaPlaces(db: Database.Database): NatCmaPlaceState[] {
   const org = getSubscribedNatCmaOrg(db);
   if (!org?.seeds?.length) return [];
-  const counts = db.prepare(
+  const countsByPlaceId = db.prepare(
+    `SELECT place_id, COUNT(*) AS c
+     FROM ${ORG_SOURCE_TABLE.nat_cma.qualTable}
+     WHERE ${ORG_SOURCE_TABLE.nat_cma.orgCol} = ? AND place_id <> ''
+     GROUP BY place_id`,
+  ).all(SELF_ORG_ID) as Array<{ place_id: string; c: number }>;
+  const countsByPlaceName = db.prepare(
     `SELECT test_object, COUNT(*) AS c
      FROM ${ORG_SOURCE_TABLE.nat_cma.qualTable}
-     WHERE ${ORG_SOURCE_TABLE.nat_cma.orgCol} = ?
+     WHERE ${ORG_SOURCE_TABLE.nat_cma.orgCol} = ? AND place_id = ''
      GROUP BY test_object`,
   ).all(SELF_ORG_ID) as Array<{ test_object: string; c: number }>;
-  const countMap = new Map(counts.map((r) => [r.test_object, r.c]));
+  const placeIdCountMap = new Map(countsByPlaceId.map((r) => [r.place_id, r.c]));
+  const placeNameCountMap = new Map(countsByPlaceName.map((r) => [r.test_object, r.c]));
   return org.seeds.map((seed) => ({
     placeId: seed.placeId,
     applyId: seed.applyId,
     placeAttr: seed.placeAttr ?? '',
     placeName: seed.placeName || org.orgName || seed.placeId,
     placeAddress: seed.placeAddress ?? seed.address ?? '',
-    localCount: countMap.get(seed.placeName ?? '') ?? 0,
+    localCount: placeIdCountMap.get(seed.placeId) ?? placeNameCountMap.get(seed.placeName ?? '') ?? 0,
   }));
 }
 
@@ -443,7 +449,7 @@ export function startNatCmaSync(db: Database.Database, org?: NatCmaOrg): string 
       }, scrapeOpts);
       setProgress(jobId, { phase: 'upserting', target: targetLabel, current: 0, total: capabilities.length });
       const count = await ingest(
-        db, 'nat_cma', target.orgName, target.certCode || target.placeId, '',
+        db, 'nat_cma', target.orgName, makeNatCmaSourceRef(target), '',
         capabilities.map(mapNatCma),
         (current, total) => setProgress(jobId, { phase: 'upserting', target: targetLabel, current, total }),
       );
@@ -523,6 +529,24 @@ function normalizeNatCmaSeeds(input: {
   return out;
 }
 
+function makeNatCmaSourceRef(input: {
+  placeId: string;
+  applyId: string;
+  certCode?: string;
+  orgName?: string;
+  region?: string;
+  address?: string;
+  seeds?: NatCmaOrgSeed[];
+}): string {
+  return JSON.stringify({
+    placeId: input.placeId,
+    applyId: input.applyId,
+    certCode: input.certCode ?? '',
+    orgName: input.orgName ?? '',
+    seeds: normalizeNatCmaSeeds(input),
+  });
+}
+
 function mapNatCma(c: NatCmaCapability): Record<string, string> {
   return {
     stdCode: c.stdCodeRaw,
@@ -531,6 +555,8 @@ function mapNatCma(c: NatCmaCapability): Record<string, string> {
     category: c.category,
     subCategory: c.subCategory,
     testObject: c.placeName,  // 场所名落入 test_object，便于区分不同场所来源
+    applyId: c.applyId,
+    placeId: c.placeId,
   };
 }
 
