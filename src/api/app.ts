@@ -23,11 +23,11 @@ export interface QualMatchApp extends Express {
  *   - express.json
  *   - 业务路由：health / watchlist（清单导入·匹配·导出）/ import（资质明细导入）/
  *     qualification（综合查询：行级搜索·按标准号聚合·导出）/ cap-lib（一单一库：领域订阅·同步·清理）/
- *     source（省级CMA·CNAS 在线抓取）
+ *     source（省级CMA·CNAS·国家 CMA 在线抓取）
  *   - 生产期静态托管 web/dist + SPA fallback（开发期前端走 Vite dev server，不在此托管）
  *   - 全局错误中间件（最后挂，4 参签名）
  *
- * 后续阶段挂入：国家 CMA（阶段 5，滑块已止损走导入降级）。
+ * 国家 CMA 后端已接入，是否允许在线抓取由系统设置开关控制。
  */
 export function createApp(): QualMatchApp {
   const app = express() as QualMatchApp;

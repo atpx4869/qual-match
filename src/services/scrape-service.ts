@@ -2,7 +2,10 @@ import type Database from 'better-sqlite3';
 import { cleanStdCode, extractFullCode, extractBaseCode } from '../shared/std-code';
 import { SELF_ORG_ID, ORG_SOURCE_TABLE, type OrgSource } from '../shared/constants';
 import { setProgress, eachProgress, enqueueSync, makeJobId } from './sync-progress';
-import { getCnasChromePath, getCnasThrottleMs } from './system-service';
+import {
+  getCnasChromePath, getCnasThrottleMs,
+  getNatCmaChromePath, getNatCmaThrottleMs, isNatCmaScrapeEnabled,
+} from './system-service';
 import { CmaScraper, type CmaCapability, type CmaDetail } from '../sources/prov-cma/cma-scraper';
 import { CnasScraper, type CnasCapability, type CnasLabInfo } from '../sources/cnas/cnas-scraper';
 import { PRESET_CNAS_LABS } from '../sources/cnas/preset-cnas-labs';
@@ -331,9 +334,10 @@ function mapCnas(c: CnasCapability): Record<string, string> {
 // ─── 国家 CMA 同步 ────────────────────────────────────────────────────────────
 /** 国家 CMA 按机构名搜候选机构（同步，直接 await 抓取器）。 */
 export function searchNatCmaOrgs(db: Database.Database, orgName: string) {
+  if (!isNatCmaScrapeEnabled(db)) throw new Error('请先在设置页开启国家 CMA 在线抓取');
   return natCmaScraper.searchOrgs(orgName, {
-    chromePath: getCnasChromePath(db),
-    throttleMs: getCnasThrottleMs(db),
+    chromePath: getNatCmaChromePath(db),
+    throttleMs: getNatCmaThrottleMs(db),
   });
 }
 
@@ -362,6 +366,7 @@ export function subscribeNatCmaLab(db: Database.Database, input: NatCmaSubscribe
 }
 
 export function startNatCmaSync(db: Database.Database, org?: NatCmaOrg): string {
+  if (!isNatCmaScrapeEnabled(db)) throw new Error('请先在设置页开启国家 CMA 在线抓取');
   const target = org ?? getSubscribedNatCmaOrg(db);
   if (!target) throw new Error('请先订阅国家 CMA 机构');
   const key = target.placeId || target.certCode;
@@ -372,7 +377,7 @@ export function startNatCmaSync(db: Database.Database, org?: NatCmaOrg): string 
   const targetLabel = `nat_cma:${key}`;
   setProgress(jobId, { phase: 'pending', target: targetLabel, current: 0, total: 0 });
 
-  const scrapeOpts = { chromePath: getCnasChromePath(db), throttleMs: getCnasThrottleMs(db) };
+  const scrapeOpts = { chromePath: getNatCmaChromePath(db), throttleMs: getNatCmaThrottleMs(db) };
 
   enqueueSync(async () => {
     try {

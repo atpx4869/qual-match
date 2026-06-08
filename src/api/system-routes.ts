@@ -5,14 +5,14 @@ import type Database from 'better-sqlite3';
 import { respond } from '../shared/response';
 import { normalizeError } from '../shared/errors';
 import {
-  collectOverview, getCnasSettings, setCnasSettings, backupDatabase,
+  collectOverview, getSystemSettings, setSystemSettings, backupDatabase,
 } from '../services/system-service';
 
 /**
  * 系统路由（阶段 6 打磨）。设置页用：数据总览 / 设置读写 / 全库备份下载。无 auth（单用户）。
  *   GET  /api/system/overview   各资质源 + 清单数据总览（只读）
- *   GET  /api/system/settings   当前有效 CNAS 设置（回退后的值）
- *   PUT  /api/system/settings   写 CNAS 设置（body { cnasChromePath?, cnasThrottleMs? }）
+ *   GET  /api/system/settings   当前有效抓取设置（回退后的值）
+ *   PUT  /api/system/settings   写抓取设置
  *   GET  /api/system/backup     下载整库 sqlite 一致快照（二进制流）
  */
 export function createSystemRoutes(db: Database.Database): Router {
@@ -28,7 +28,7 @@ export function createSystemRoutes(db: Database.Database): Router {
   // ── 设置读 ──
   router.get('/api/system/settings', (_req, res, next) => {
     try {
-      respond(res, getCnasSettings(db));
+      respond(res, getSystemSettings(db));
     } catch (e) { next(normalizeError(e)); }
   });
 
@@ -38,9 +38,12 @@ export function createSystemRoutes(db: Database.Database): Router {
       const input = z.object({
         cnasChromePath: z.string().trim().optional(),
         cnasThrottleMs: z.number().int().min(0).max(60000).optional(),
+        natCmaEnabled: z.boolean().optional(),
+        natCmaChromePath: z.string().trim().optional(),
+        natCmaThrottleMs: z.number().int().min(0).max(60000).optional(),
       }).parse(req.body);
-      setCnasSettings(db, input);
-      respond(res, getCnasSettings(db));
+      setSystemSettings(db, input);
+      respond(res, getSystemSettings(db));
     } catch (e) { next(normalizeError(e)); }
   });
 

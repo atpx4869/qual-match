@@ -25,6 +25,9 @@ export interface SystemOverview {
 export interface SystemSettings {
   cnasChromePath: string;
   cnasThrottleMs: number;
+  natCmaEnabled: boolean;
+  natCmaChromePath: string;
+  natCmaThrottleMs: number;
 }
 
 // ─── API ───────────────────────────────────────────────────────────────────

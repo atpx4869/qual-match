@@ -9,7 +9,7 @@
 > ✅ 阶段 2 综合查询 + ✅ 阶段 3 一单一库自动同步（MVP 闭环）+ ✅ 阶段 4 省级 CMA/CNAS 抓取
 > （省级 CMA 联网验证 28110 条、CNAS 联网验证 7451 条，均匹配命中，2026-06-05），
 > ✅ 阶段 6 打磨（设置页 / 部署说明 / 全库备份，2026-06-07）。
-> ✅ 阶段 5 国家 CMA 在线抓取已打通（2026-06-08，滑块缺口直检 + 三层下钻，原止损翻案；后端已通，前端 tab 待补，Excel 导入降级仍保留）。
+> ✅ 阶段 5 国家 CMA 在线抓取已打通（2026-06-08，滑块缺口直检 + 三层下钻，原止损翻案；前后端已接入，Excel 导入降级仍保留）。
 
 ---
 
@@ -91,7 +91,7 @@
 | Web 框架 | Express 5 | bzxz |
 | 数据库 | better-sqlite3（单文件 SQLite） | bzxz |
 | HTML 抓取 | cheerio | bzxz cma/cnas scraper |
-| 动态渲染抓取 | playwright（CNAS；国家 CMA 仅保留 PoC 结论） | bzxz cnas-scraper |
+| 动态渲染抓取 | playwright（CNAS；国家 CMA 在线抓取） | bzxz cnas-scraper + 国家 CMA PoC |
 | Excel 读写 | xlsx（SheetJS） | bzxz check/cap-lib 导出 |
 | 请求校验 | zod | bzxz |
 | 标准号归一化 | 三层 std-code（cleanStdCode / extractFullCode / extractBaseCode） | bzxz src/shared/std-code.ts **直接移植** |
@@ -410,7 +410,7 @@ settings  ── 全局配置
 - `import-service.ts`：清单 Excel / 粘贴导入，以及三类机构型资质 Excel 导入。
 
 这个结构更贴合各源差异：省级 CMA 是 HTTP+HTML，CNAS 是 playwright+JSL 反爬，一单一库是 RuoYi JSON
-分页接口，国家 CMA 当前不做在线抓取。
+分页接口，国家 CMA 是 playwright + 滑块缺口直检 + 三层下钻抓取。
 
 ### 3.2 入库统一归一化（强制契约）
 
@@ -446,24 +446,16 @@ insert.run(target, stdCode, norm, base, /* ...其余字段 */);
 
 ### 3.5 国家 CMA（`cma.cnca.cn`）
 
-国家 CMA 在线抓取已在 `poc/` 中做过滑块破解探索，结论是：短期稳定性不足，不进入生产主线。
-
-2026-06-07 复探补充：
-
-- `getSliderCaptcha` 仍可返回 `bg` / `slider` / `y`，`captchaVerify` 只接收 `moveX`；脚本中曾观察到
-  自动识别坐标返回 `success`，但连续复跑命中率仍不稳定。
-- 主页面 `tBzAbilitySearch/list` 与弹窗 `searchCondition?flag=1` 是老式表单入口，短时间连续请求会偶发
-  `400 参数有误`；请求头/Content-Type 也比较敏感。
-- 入口语义更像「按能力条件反查机构」，不是「按证书号导出某机构全部能力明细」。实测
-  `certCode=230020349767` 返回 0 条，而 `searchCondition` 可按大类关键词返回候选（如“家具”返回 45 条）。
-- 新增 `poc/nat_cma_online_probe.py` 作为复探脚本：可低频验证滑块、证书查询、能力候选解析；不作为生产同步依赖。
+国家 CMA 在线抓取已打通并接入生产代码。2026-06-08 复盘结论：原“滑块命中率不稳”判断来自模板匹配偏移，
+稳定方案是对背景图缺口行做垂直 Sobel，直接检测缺口左缘作为 `moveX`。入口语义也已确认：
+`list` 按机构名返回候选机构与 `placeId/applyId`，再按场所下钻到 `formAbility` 分页抓能力明细。
 
 当前策略：
 
-- 不实现在线抓取器，不把滑块破解作为交付依赖。
-- 保留 `nat_cma_labs` / `nat_cma_qualifications` 表结构与匹配列。
-- 用户通过 Excel 导入国家 CMA 明细，后续与省级 CMA / CNAS 一样参与主匹配、综合查询和导出。
-- 如未来有稳定接口、官方导出或明确模板，再重开国家 CMA 在线同步。
+- 后端实现 `src/sources/nat-cma/nat-cma-scraper.ts`，service/routes 接入 `/api/sources/nat_cma/search|subscribe|sync`。
+- 前端 `SourcesPage` 已接入国家 CMA tab，支持搜索、订阅、同步和进度轮询。
+- 设置页提供 `nat_cma_scrape_enabled` 开关、国家 CMA 浏览器路径和节流设置；默认关闭，用户确认后启用。
+- Excel 导入降级仍保留，导入明细与在线抓取一样参与主匹配、综合查询和导出。
 
 **机构标识**：`cert_number`。单机构定位下，导入明细仍写入 `SELF_ORG_ID='_self'`。
 
@@ -816,16 +808,16 @@ server: { proxy: { '/api': 'http://localhost:3000' } }
 - 前端：资质管理对应 tab。
 - 验证：省级 CMA 联网抓取 28110 条、CNAS 联网抓取 7451 条，均已入库并匹配命中。
 
-#### 阶段 5 · 国家 CMA 在线抓取止损，Excel 导入降级
+#### 阶段 5 · 国家 CMA 在线抓取 ✅ 完成
 
-- `poc/` 已做滑块破解探索，稳定性未达到生产要求，在线抓取路线止损。
-- 保留 `nat_cma_labs` / `nat_cma_qualifications` 数据模型与导入能力。
-- 当前可通过 `/api/import/qualifications` 导入国家 CMA Excel 明细，走同一套三层归一化、匹配、导出链路。
-- 后续只有在有稳定数据接口或可控人工导入模板需求时再重开。
+- `poc/` 已验证滑块缺口直检与三层下钻链路，后端抓取器/service/routes 已接入。
+- 前端 SourcesPage 国家 CMA tab 已支持搜索、订阅、同步和进度轮询。
+- 设置页已提供国家 CMA 抓取开关、浏览器路径和节流配置。
+- `/api/import/qualifications` 导入国家 CMA Excel 明细的降级路径仍保留。
 
 #### 阶段 6 · 打磨 ✅ 完成
 
-- 设置页：数据总览、CNAS 浏览器路径、CNAS 翻页节流配置。
+- 设置页：数据总览、CNAS/国家 CMA 浏览器路径、翻页节流配置和国家 CMA 抓取开关。
 - 全库备份：SQLite online backup 一致快照下载。
 - README + 部署说明：生产单端口托管、`playwright install`、Chrome/Edge 退路、备份/迁移说明。
 - 匹配页：服务端分页、排序、关键词筛选、资质列状态筛选。

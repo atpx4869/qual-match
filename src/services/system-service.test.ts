@@ -5,6 +5,9 @@ import { importQualifications } from './import-service';
 import {
   collectOverview, getCnasThrottleMs, getCnasChromePath,
   DEFAULT_CNAS_THROTTLE_MS, SETTING_CNAS_THROTTLE_MS, SETTING_CNAS_CHROME_PATH,
+  getNatCmaChromePath, getNatCmaThrottleMs, isNatCmaScrapeEnabled,
+  DEFAULT_NAT_CMA_THROTTLE_MS, SETTING_NAT_CMA_CHROME_PATH,
+  SETTING_NAT_CMA_ENABLED, SETTING_NAT_CMA_THROTTLE_MS,
 } from './system-service';
 
 // 内存库，每个用例独立建库（getDb(':memory:') 不缓存单例）。不打网络。
@@ -118,5 +121,52 @@ describe('getCnasChromePath — 路径回退', () => {
   });
   it('两者都空 → 自动探测本机浏览器或空串', () => {
     expect(typeof getCnasChromePath(db)).toBe('string');
+  });
+});
+
+describe('国家 CMA 抓取设置', () => {
+  let db: Database.Database;
+  const NAT_ENV_KEY = 'NAT_CMA_CHROME_PATH';
+  const CNAS_ENV_KEY = 'CNAS_CHROME_PATH';
+  let savedNat: string | undefined;
+  let savedCnas: string | undefined;
+
+  beforeEach(() => {
+    db = freshDb();
+    savedNat = process.env[NAT_ENV_KEY];
+    savedCnas = process.env[CNAS_ENV_KEY];
+    delete process.env[NAT_ENV_KEY];
+    delete process.env[CNAS_ENV_KEY];
+  });
+  afterEach(() => {
+    if (savedNat === undefined) delete process.env[NAT_ENV_KEY]; else process.env[NAT_ENV_KEY] = savedNat;
+    if (savedCnas === undefined) delete process.env[CNAS_ENV_KEY]; else process.env[CNAS_ENV_KEY] = savedCnas;
+  });
+
+  it('开关默认关闭，写 1 后开启', () => {
+    expect(isNatCmaScrapeEnabled(db)).toBe(false);
+    setSetting(db, SETTING_NAT_CMA_ENABLED, '1');
+    expect(isNatCmaScrapeEnabled(db)).toBe(true);
+  });
+
+  it('浏览器路径优先级：国家 CMA settings → NAT_CMA_CHROME_PATH → CNAS 回退', () => {
+    setSetting(db, SETTING_NAT_CMA_CHROME_PATH, 'C:/nat/settings/chrome.exe');
+    process.env[NAT_ENV_KEY] = 'C:/nat/env/chrome.exe';
+    process.env[CNAS_ENV_KEY] = 'C:/cnas/env/chrome.exe';
+    expect(getNatCmaChromePath(db)).toBe('C:/nat/settings/chrome.exe');
+
+    setSetting(db, SETTING_NAT_CMA_CHROME_PATH, '');
+    expect(getNatCmaChromePath(db)).toBe('C:/nat/env/chrome.exe');
+
+    delete process.env[NAT_ENV_KEY];
+    expect(getNatCmaChromePath(db)).toBe('C:/cnas/env/chrome.exe');
+  });
+
+  it('节流值合法则使用，非法则回退默认', () => {
+    expect(getNatCmaThrottleMs(db)).toBe(DEFAULT_NAT_CMA_THROTTLE_MS);
+    setSetting(db, SETTING_NAT_CMA_THROTTLE_MS, '2500');
+    expect(getNatCmaThrottleMs(db)).toBe(2500);
+    setSetting(db, SETTING_NAT_CMA_THROTTLE_MS, 'bad');
+    expect(getNatCmaThrottleMs(db)).toBe(DEFAULT_NAT_CMA_THROTTLE_MS);
   });
 });

@@ -19,6 +19,10 @@ import { ORG_SOURCE_TABLE, SELF_ORG_ID, ORG_SOURCES } from '../shared/constants'
 export const SETTING_CNAS_CHROME_PATH = 'cnas_chrome_path';
 export const SETTING_CNAS_THROTTLE_MS = 'cnas_throttle_min_ms';
 export const DEFAULT_CNAS_THROTTLE_MS = 1500;
+export const SETTING_NAT_CMA_ENABLED = 'nat_cma_scrape_enabled';
+export const SETTING_NAT_CMA_CHROME_PATH = 'nat_cma_chrome_path';
+export const SETTING_NAT_CMA_THROTTLE_MS = 'nat_cma_throttle_min_ms';
+export const DEFAULT_NAT_CMA_THROTTLE_MS = 1500;
 const THROTTLE_MAX_MS = 60000;
 
 /** CNAS 浏览器 executablePath：settings 非空优先，否则回退环境变量（向后兼容）。 */
@@ -51,26 +55,70 @@ export function getCnasThrottleMs(db: Database.Database): number {
   return DEFAULT_CNAS_THROTTLE_MS;
 }
 
-export interface CnasSettingsInput {
-  cnasChromePath?: string;
-  cnasThrottleMs?: number;
+/** 国家 CMA 抓取开关：默认关，避免误触滑块站点；用户确认后在设置页开启。 */
+export function isNatCmaScrapeEnabled(db: Database.Database): boolean {
+  return getSetting(db, SETTING_NAT_CMA_ENABLED, '0').trim() === '1';
 }
 
-/** 写入 CNAS 设置（仅写传入的字段；throttle 存为字符串）。 */
-export function setCnasSettings(db: Database.Database, input: CnasSettingsInput): void {
+/** 国家 CMA 浏览器 executablePath：独立设置优先，其次 NAT_CMA_CHROME_PATH，再回退 CNAS/本机浏览器。 */
+export function getNatCmaChromePath(db: Database.Database): string {
+  const fromSettings = getSetting(db, SETTING_NAT_CMA_CHROME_PATH, '').trim();
+  if (fromSettings) return fromSettings;
+  const fromEnv = process.env.NAT_CMA_CHROME_PATH?.trim();
+  if (fromEnv) return fromEnv;
+  return getCnasChromePath(db);
+}
+
+/** 国家 CMA 抓取每页节流下限（ms）。 */
+export function getNatCmaThrottleMs(db: Database.Database): number {
+  const raw = getSetting(db, SETTING_NAT_CMA_THROTTLE_MS, '').trim();
+  if (!raw) return DEFAULT_NAT_CMA_THROTTLE_MS;
+  const n = Number(raw);
+  if (Number.isFinite(n) && n >= 0 && n <= THROTTLE_MAX_MS) return n;
+  return DEFAULT_NAT_CMA_THROTTLE_MS;
+}
+
+export interface SystemSettingsInput {
+  cnasChromePath?: string;
+  cnasThrottleMs?: number;
+  natCmaEnabled?: boolean;
+  natCmaChromePath?: string;
+  natCmaThrottleMs?: number;
+}
+
+/** 写入抓取设置（仅写传入的字段；number/boolean 存为字符串）。 */
+export function setSystemSettings(db: Database.Database, input: SystemSettingsInput): void {
   if (input.cnasChromePath !== undefined) {
     setSetting(db, SETTING_CNAS_CHROME_PATH, input.cnasChromePath.trim());
   }
   if (input.cnasThrottleMs !== undefined) {
     setSetting(db, SETTING_CNAS_THROTTLE_MS, String(input.cnasThrottleMs));
   }
+  if (input.natCmaEnabled !== undefined) {
+    setSetting(db, SETTING_NAT_CMA_ENABLED, input.natCmaEnabled ? '1' : '0');
+  }
+  if (input.natCmaChromePath !== undefined) {
+    setSetting(db, SETTING_NAT_CMA_CHROME_PATH, input.natCmaChromePath.trim());
+  }
+  if (input.natCmaThrottleMs !== undefined) {
+    setSetting(db, SETTING_NAT_CMA_THROTTLE_MS, String(input.natCmaThrottleMs));
+  }
 }
 
-/** 读取当前有效 CNAS 设置（回退后的值，供设置页回显）。 */
-export function getCnasSettings(db: Database.Database): { cnasChromePath: string; cnasThrottleMs: number } {
+/** 读取当前有效抓取设置（回退后的值，供设置页回显）。 */
+export function getSystemSettings(db: Database.Database): {
+  cnasChromePath: string;
+  cnasThrottleMs: number;
+  natCmaEnabled: boolean;
+  natCmaChromePath: string;
+  natCmaThrottleMs: number;
+} {
   return {
     cnasChromePath: getCnasChromePath(db),
     cnasThrottleMs: getCnasThrottleMs(db),
+    natCmaEnabled: isNatCmaScrapeEnabled(db),
+    natCmaChromePath: getNatCmaChromePath(db),
+    natCmaThrottleMs: getNatCmaThrottleMs(db),
   };
 }
 

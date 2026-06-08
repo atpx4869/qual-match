@@ -19,6 +19,14 @@ export interface CnasPreset {
   subscribed: boolean;
 }
 
+export interface NatCmaSearchResult {
+  certCode: string;
+  orgName: string;
+  address: string;
+  placeId: string;
+  applyId: string;
+}
+
 export type OrgSource = 'prov_cma' | 'cnas' | 'nat_cma';
 
 export interface SourceLab {
@@ -77,6 +85,33 @@ export function syncSubscribedCnas(): Promise<{ jobId: string }> {
 
 export function subscribeCnas(labNo: string): Promise<{ ok: boolean }> {
   return apiPost('/api/sources/cnas/subscribe', { labNo });
+}
+
+export function searchNatCma(q: string): Promise<{ items: NatCmaSearchResult[]; total: number }> {
+  return apiGet(`/api/sources/nat_cma/search?q=${encodeURIComponent(q)}`);
+}
+
+export function syncNatCma(item: NatCmaSearchResult): Promise<{ jobId: string }> {
+  return apiPost('/api/sources/nat_cma/sync', {
+    certCode: item.certCode,
+    orgName: item.orgName,
+    placeId: item.placeId,
+    applyId: item.applyId,
+  });
+}
+
+export function syncSubscribedNatCma(): Promise<{ jobId: string }> {
+  return apiPost('/api/sources/nat_cma/sync', {});
+}
+
+export function subscribeNatCma(item: NatCmaSearchResult): Promise<{ ok: boolean }> {
+  return apiPost('/api/sources/nat_cma/subscribe', {
+    certCode: item.certCode,
+    orgName: item.orgName,
+    placeId: item.placeId,
+    applyId: item.applyId,
+    region: item.address,
+  });
 }
 
 export function getSourceSyncProgress(jobId: string): Promise<SyncProgress> {

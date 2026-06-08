@@ -9,7 +9,13 @@ import {
 const overview = ref<SystemOverview | null>(null);
 const overviewLoading = ref(false);
 
-const settings = reactive<SystemSettings>({ cnasChromePath: '', cnasThrottleMs: 1500 });
+const settings = reactive<SystemSettings>({
+  cnasChromePath: '',
+  cnasThrottleMs: 1500,
+  natCmaEnabled: false,
+  natCmaChromePath: '',
+  natCmaThrottleMs: 1500,
+});
 const settingsLoading = ref(false);
 const saving = ref(false);
 const backuping = ref(false);
@@ -40,6 +46,9 @@ async function loadSettings() {
     const s = await getSettings();
     settings.cnasChromePath = s.cnasChromePath;
     settings.cnasThrottleMs = s.cnasThrottleMs;
+    settings.natCmaEnabled = s.natCmaEnabled;
+    settings.natCmaChromePath = s.natCmaChromePath;
+    settings.natCmaThrottleMs = s.natCmaThrottleMs;
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '加载设置失败');
   } finally {
@@ -53,9 +62,15 @@ async function saveSettings() {
     const s = await updateSettings({
       cnasChromePath: settings.cnasChromePath,
       cnasThrottleMs: settings.cnasThrottleMs,
+      natCmaEnabled: settings.natCmaEnabled,
+      natCmaChromePath: settings.natCmaChromePath,
+      natCmaThrottleMs: settings.natCmaThrottleMs,
     });
     settings.cnasChromePath = s.cnasChromePath;
     settings.cnasThrottleMs = s.cnasThrottleMs;
+    settings.natCmaEnabled = s.natCmaEnabled;
+    settings.natCmaChromePath = s.natCmaChromePath;
+    settings.natCmaThrottleMs = s.natCmaThrottleMs;
     ElMessage.success('设置已保存');
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '保存失败');
@@ -131,9 +146,9 @@ onMounted(() => {
 
     <!-- B 设置表单 -->
     <el-card v-loading="settingsLoading" class="block" shadow="never">
-      <template #header><span class="block-title">CNAS 抓取设置</span></template>
+      <template #header><span class="block-title">在线抓取设置</span></template>
       <el-form label-width="160px" style="max-width: 640px">
-        <el-form-item label="浏览器路径">
+        <el-form-item label="CNAS 浏览器路径">
           <el-input
             v-model="settings.cnasChromePath"
             placeholder="留空则用环境变量 CNAS_CHROME_PATH 或 playwright 自带 chromium"
@@ -148,6 +163,31 @@ onMounted(() => {
           />
           <span class="form-unit">毫秒</span>
           <div class="form-hint">CNAS 反爬节流，每页实际等待 = 此值 + 随机 0~2000ms。默认 1500。</div>
+        </el-form-item>
+        <el-divider />
+        <el-form-item label="国家 CMA 抓取">
+          <el-switch
+            v-model="settings.natCmaEnabled"
+            active-text="开启"
+            inactive-text="关闭"
+          />
+          <div class="form-hint">国家 CMA 需要滑块校验，默认关闭；开启后资质管理页可搜索、订阅并同步。</div>
+        </el-form-item>
+        <el-form-item label="国家 CMA 浏览器路径">
+          <el-input
+            v-model="settings.natCmaChromePath"
+            placeholder="留空则用 NAT_CMA_CHROME_PATH，再回退 CNAS 浏览器路径"
+            clearable
+          />
+          <div class="form-hint">可指向现成 chrome.exe；留空时会复用 CNAS 浏览器配置。</div>
+        </el-form-item>
+        <el-form-item label="国家 CMA 节流下限">
+          <el-input-number
+            v-model="settings.natCmaThrottleMs"
+            :min="0" :max="60000" :step="500"
+          />
+          <span class="form-unit">毫秒</span>
+          <div class="form-hint">用于国家 CMA 场所/能力分页抓取，默认 1500。</div>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="saving" @click="saveSettings">保存设置</el-button>

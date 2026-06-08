@@ -178,7 +178,7 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
 - `web/src/pages/SettingsPage.vue` + `web/src/api/system.ts`：设置页替换 `PlaceholderPage`，路由和侧边栏已接入。
 - `README.md`：补齐生产部署说明、Playwright/Chrome 退路、备份与运行参数说明。
 - `MatchPage.vue` / `match-service.ts`：清单匹配支持服务端分页、排序、关键词筛选、资质列状态筛选。
-- 验证：`npm test`（7 个测试文件 / 65 个用例）、`npx tsc -p tsconfig.json --noEmit`、`npm run web:typecheck` 均通过。
+- 验证：`npm test`（7 个测试文件 / 68 个用例）、`npx tsc -p tsconfig.json --noEmit`、`npm run web:typecheck` 均通过。
 
 剩余只有可选项：
 - **国家 CMA 在线抓取（2026-06-08 已打通 ✅，原止损翻案）**：
@@ -192,12 +192,11 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
     scrape-service 的 `searchNatCmaOrgs/subscribeNatCmaLab/startNatCmaSync`、source-routes 的
     `/api/sources/nat_cma/search·subscribe·sync`。后端类型检查 + 65 单测通过；联网验证
     (湖北省产品质量监督检验研究院 5 场所合计 10955 条，标准号正确)。
-  - **下一步（明天换电脑续）**：① 前端 SourcesPage 加「国家 CMA」tab（仿省级 CMA：搜机构→订阅→
-    抓取→进度），api/sources.ts 加对应函数；② 浏览器退路：本机 playwright 自带 chromium 版本
-    不匹配，跑抓取要设环境变量 `NAT_CMA_CHROME_PATH`(或 CNAS_CHROME_PATH) 指向系统 Chrome
+  - **前端已补**：SourcesPage 的「国家 CMA」tab 已支持搜机构→订阅→抓取→进度；api/sources.ts 已有对应函数。
+    设置页已接入 `nat_cma_scrape_enabled` 开关、国家 CMA 浏览器路径和节流设置（默认关闭，需用户确认开启）。
+    浏览器退路：可设 `NAT_CMA_CHROME_PATH` 指向系统 Chrome
     (`C:/Program Files/Google/Chrome/Application/chrome.exe`)，或 `npx playwright install chromium`；
-    ③ 设置页可加 `nat_cma_scrape_enabled` 开关 UI（db 已有该 setting，默认 '0'）；
-    ④ 全量抓取规模大(单机构上万条)，scrapeOrg 支持 `maxPagesPerPlace` 限量。
+    留空时回退 CNAS 浏览器设置/本机浏览器探测。全量抓取规模大(单机构上万条)，scrapeOrg 支持 `maxPagesPerPlace` 限量。
   - PoC 完整可跑脚本：`poc/nat_cma_online_scraper.py`(Python 版,含滑块自测 --self-test)。
 - **发布前验收**：真实 UI 冒烟一次（导入清单→匹配→导出、设置页备份下载、CNAS 配置保存）。
 

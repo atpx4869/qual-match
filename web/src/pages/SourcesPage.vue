@@ -8,8 +8,9 @@ import {
 import {
   searchProvCma, syncProvCma, syncSubscribedProvCma, subscribeProvCma,
   listCnasPresets, syncCnas, syncSubscribedCnas, subscribeCnas,
+  searchNatCma, syncNatCma, syncSubscribedNatCma, subscribeNatCma,
   getSourceSyncProgress, getSourceOrg,
-  type ProvCmaSearchResult, type CnasPreset, type SourceOrgState, type OrgSource,
+  type ProvCmaSearchResult, type CnasPreset, type NatCmaSearchResult, type SourceOrgState, type OrgSource,
 } from '@/api/sources';
 import SyncProgressBar from '@/components/SyncProgress.vue';
 
@@ -117,17 +118,20 @@ const SYNC_STATUS_LABEL: Record<string, string> = {
 
 const cmaOrg = ref<SourceOrgState | null>(null);
 const cnasOrg = ref<SourceOrgState | null>(null);
+const natCmaOrg = ref<SourceOrgState | null>(null);
 const sourceLoading = ref(false);
 
 async function refreshSourceOrgs() {
   sourceLoading.value = true;
   try {
-    const [prov, cnas] = await Promise.all([
+    const [prov, cnas, nat] = await Promise.all([
       getSourceOrg('prov_cma'),
       getSourceOrg('cnas'),
+      getSourceOrg('nat_cma'),
     ]);
     cmaOrg.value = prov;
     cnasOrg.value = cnas;
+    natCmaOrg.value = nat;
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '加载本地存量失败');
   } finally {
@@ -154,6 +158,26 @@ function statusTagType(v: string | null | undefined) {
 
 function isCmaSubscribed(r: ProvCmaSearchResult): boolean {
   return cmaOrg.value?.lab?.sourceRef === r.publicDetailId;
+}
+
+function parseNatCmaSourceRef(raw: string | null | undefined): Partial<NatCmaSearchResult> | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Partial<NatCmaSearchResult>;
+  } catch {
+    return null;
+  }
+}
+
+function natCmaRefLabel(raw: string | null | undefined): string {
+  const parsed = parseNatCmaSourceRef(raw);
+  if (!parsed) return raw || '—';
+  return [parsed.certCode, parsed.placeId].filter(Boolean).join(' / ') || '—';
+}
+
+function isNatCmaSubscribed(r: NatCmaSearchResult): boolean {
+  const parsed = parseNatCmaSourceRef(natCmaOrg.value?.lab?.sourceRef);
+  return parsed?.placeId === r.placeId && parsed?.applyId === r.applyId;
 }
 
 // ─── 省级 CMA ──
@@ -255,9 +279,61 @@ async function doCnasSyncSubscribed() {
   }
 }
 
-/** 通用抓取进度轮询（省级 CMA / CNAS 共用，单任务串行）。 */
+// ─── 国家 CMA ──
+const natCmaQuery = ref('');
+const natCmaSearching = ref(false);
+const natCmaResults = ref<NatCmaSearchResult[]>([]);
+const natCmaProgress = ref<SyncProgress | null>(null);
+let natCmaTimer: ReturnType<typeof setInterval> | null = null;
+
+async function doNatCmaSearch() {
+  if (!natCmaQuery.value.trim()) { ElMessage.warning('请输入机构名'); return; }
+  natCmaSearching.value = true;
+  try {
+    const res = await searchNatCma(natCmaQuery.value.trim());
+    natCmaResults.value = res.items;
+    if (res.total === 0) ElMessage.info('没有搜到机构');
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '搜索失败');
+  } finally {
+    natCmaSearching.value = false;
+  }
+}
+
+async function doNatCmaSync(r: NatCmaSearchResult) {
+  try {
+    await subscribeNatCma(r);
+    await refreshSourceOrgs();
+    const { jobId } = await syncNatCma(r);
+    pollSource('nat_cma', jobId, natCmaProgress, natCmaTimer, (t) => { natCmaTimer = t; });
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '抓取启动失败');
+  }
+}
+
+async function doNatCmaSubscribe(r: NatCmaSearchResult) {
+  try {
+    await subscribeNatCma(r);
+    await refreshSourceOrgs();
+    ElMessage.success('国家 CMA 机构已订阅');
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '订阅失败');
+  }
+}
+
+async function doNatCmaSyncSubscribed() {
+  if (!natCmaOrg.value?.lab?.sourceRef) { ElMessage.warning('请先订阅国家 CMA 机构'); return; }
+  try {
+    const { jobId } = await syncSubscribedNatCma();
+    pollSource('nat_cma', jobId, natCmaProgress, natCmaTimer, (t) => { natCmaTimer = t; });
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '同步启动失败');
+  }
+}
+
+/** 通用抓取进度轮询（省级 CMA / CNAS / 国家 CMA 共用，单任务串行）。 */
 function pollSource(
-  source: Extract<OrgSource, 'prov_cma' | 'cnas'>,
+  source: OrgSource,
   jobId: string,
   slot: Ref<SyncProgress | null>,
   oldTimer: ReturnType<typeof setInterval> | null,
@@ -292,6 +368,7 @@ onUnmounted(() => {
   for (const t of pollTimers.values()) clearInterval(t);
   if (cmaTimer) clearInterval(cmaTimer);
   if (cnasTimer) clearInterval(cnasTimer);
+  if (natCmaTimer) clearInterval(natCmaTimer);
 });
 </script>
 
@@ -440,7 +517,59 @@ onUnmounted(() => {
       </el-tab-pane>
 
       <el-tab-pane label="国家 CMA" name="nat_cma">
-        <el-empty description="国家 CMA · 阶段 5 接入（滑块已止损，走 Excel 导入降级）" />
+        <div class="tab-toolbar">
+          <span class="hint">国家 CMA 认可能力库 · 需先在设置页开启在线抓取，再按机构订阅并同步</span>
+          <el-button size="small" @click="refreshSourceOrgs">刷新本地状态</el-button>
+          <el-button size="small" type="primary" :disabled="!natCmaOrg?.lab?.sourceRef" @click="doNatCmaSyncSubscribed">同步订阅</el-button>
+        </div>
+        <div v-loading="sourceLoading" class="source-status">
+          <div class="status-main">
+            <div class="status-title">{{ natCmaOrg?.lab?.labName || '未订阅国家 CMA 机构' }}</div>
+            <div class="status-sub">
+              <span>订阅标识：{{ natCmaRefLabel(natCmaOrg?.lab?.sourceRef) }}</span>
+              <span>地址：{{ natCmaOrg?.lab?.region || '—' }}</span>
+              <span>上次同步：{{ fmtNullableTime(natCmaOrg?.lab?.lastSyncAt) }}</span>
+            </div>
+          </div>
+          <div class="status-metrics">
+            <el-statistic title="本地明细" :value="natCmaOrg?.localCount || 0" />
+            <el-tag :type="statusTagType(natCmaOrg?.lab?.syncStatus)">{{ statusLabel(natCmaOrg?.lab?.syncStatus) }}</el-tag>
+            <el-tag type="info">{{ originLabel(natCmaOrg?.lab?.dataOrigin) }}</el-tag>
+          </div>
+        </div>
+        <el-alert
+          v-if="natCmaOrg?.lab?.syncError"
+          :title="natCmaOrg.lab.syncError"
+          type="error"
+          show-icon
+          :closable="false"
+          class="source-error"
+        />
+        <SyncProgressBar v-if="natCmaProgress" :progress="natCmaProgress" style="margin-bottom: 12px" />
+        <div class="query-bar">
+          <el-input v-model="natCmaQuery" placeholder="本机构名称，如 湖北省产品质量监督检验研究院" clearable
+            style="width: 380px" @keyup.enter="doNatCmaSearch" />
+          <el-button type="primary" :loading="natCmaSearching" @click="doNatCmaSearch">搜索</el-button>
+        </div>
+        <el-table v-if="natCmaResults.length" :data="natCmaResults" border stripe>
+          <el-table-column prop="orgName" label="机构名称" min-width="240" show-overflow-tooltip />
+          <el-table-column prop="certCode" label="证书编号" width="150" show-overflow-tooltip />
+          <el-table-column prop="address" label="地址" min-width="220" show-overflow-tooltip />
+          <el-table-column label="场所标识" width="160" show-overflow-tooltip>
+            <template #default="{ row }">{{ (row as NatCmaSearchResult).placeId }}</template>
+          </el-table-column>
+          <el-table-column label="订阅" width="100" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="isNatCmaSubscribed(row as NatCmaSearchResult)" type="success" size="small">当前</el-tag>
+              <el-button v-else size="small" @click="doNatCmaSubscribe(row as NatCmaSearchResult)">订阅</el-button>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="130">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" @click="doNatCmaSync(row as NatCmaSearchResult)">订阅并同步</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
       </el-tab-pane>
     </el-tabs>
   </div>

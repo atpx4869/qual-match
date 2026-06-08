@@ -280,7 +280,7 @@ function renormalizeOnAlgoBump(db: Database.Database): void {
 function seedSettings(db: Database.Database): void {
   // 默认配置（首次写入，已存在则不覆盖用户改动）
   const defaults: Record<string, string> = {
-    nat_cma_scrape_enabled: '0',   // 国家 CMA 抓取默认关（滑块未达生产标准，走导入降级）
+    nat_cma_scrape_enabled: '0',   // 国家 CMA 抓取默认关，需在设置页确认开启。
   };
   for (const [k, v] of Object.entries(defaults)) {
     db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(k, v);
