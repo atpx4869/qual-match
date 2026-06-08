@@ -211,7 +211,6 @@ export class NatCmaScraper {
       // 2) 逐场所、逐页抓明细
       const capabilities: NatCmaCapability[] = [];
       let grandTotal = 0;
-      const placeTotals: number[] = [];
 
       // 先探每个场所总数（第 1 页），累加为 grandTotal
       for (const p of places) {
@@ -221,7 +220,6 @@ export class NatCmaScraper {
         }, { placeId: p.placeId, applyId: applyByPlace.get(p.placeId) ?? org.applyId, pageNo: 1, pageSize: 50 })) as {
           total: number; rows: Array<Omit<NatCmaCapability, 'placeName' | 'placeAddress'>>;
         };
-        placeTotals.push(first.total || 0);
         grandTotal += first.total || 0;
         for (const r of first.rows) {
           capabilities.push({ ...r, placeName: p.placeName, placeAddress: p.placeAddress });
@@ -229,12 +227,13 @@ export class NatCmaScraper {
         onProgress?.(capabilities.length, grandTotal, p.placeName);
         await sleep(throttle + Math.random() * 800);
 
-        // 剩余页
-        const total = first.total || 0;
+        // 剩余页：国家 CMA 页面里的“共 N 条”可能被截断成 120，不能用它作为停止条件。
+        // 继续翻页直到空页、重复页，或用户显式设置 maxPagesPerPlace。
         const pageSize = 50;
-        let pages = Math.ceil(total / pageSize);
-        if (maxPages > 0) pages = Math.min(pages, maxPages);
-        for (let pageNo = 2; pageNo <= pages; pageNo++) {
+        const seenPageSignatures = new Set<string>();
+        seenPageSignatures.add(pageSignature(first.rows));
+        const hardPageLimit = maxPages > 0 ? maxPages : 500;
+        for (let pageNo = 2; pageNo <= hardPageLimit; pageNo++) {
           const more = (await page.evaluate(async (args) => {
             // @ts-expect-error 注入的页内 helper
             return await window.__natcma_fetchPlacePage(args.placeId, args.applyId, args.pageNo, args.pageSize);
@@ -242,9 +241,13 @@ export class NatCmaScraper {
             total: number; rows: Array<Omit<NatCmaCapability, 'placeName' | 'placeAddress'>>;
           };
           if (!more.rows.length) break;
+          const sig = pageSignature(more.rows);
+          if (seenPageSignatures.has(sig)) break;
+          seenPageSignatures.add(sig);
           for (const r of more.rows) {
             capabilities.push({ ...r, placeName: p.placeName, placeAddress: p.placeAddress });
           }
+          if (capabilities.length > grandTotal) grandTotal = capabilities.length;
           onProgress?.(capabilities.length, grandTotal, p.placeName);
           await sleep(throttle + Math.random() * 800);
         }
@@ -259,6 +262,10 @@ export class NatCmaScraper {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function pageSignature(rows: Array<Pick<NatCmaCapability, 'stdCodeRaw' | 'stdName' | 'testParam'>>): string {
+  return rows.map((r) => `${r.stdCodeRaw}|${r.stdName}|${r.testParam}`).join('\n');
 }
 
 /**
