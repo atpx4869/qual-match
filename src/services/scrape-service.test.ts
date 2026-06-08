@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { getDb, resetDbForTesting } from './db';
+import { deleteLocalSourceData } from './scrape-service';
 import { CmaScraper } from '../sources/prov-cma/cma-scraper';
 import { CnasScraper, type CnasLabInfo } from '../sources/cnas/cnas-scraper';
+import { SELF_ORG_ID } from '../shared/constants';
 
 /**
  * 抓取器解析逻辑单测（不打网络）。用固定 HTML / URL 验证移植后的 cheerio 选择器、
@@ -59,5 +62,26 @@ describe('CnasScraper.parseUrl（静态）', () => {
   it('缺 baseInfoId 或 licNo → null', () => {
     expect(CnasScraper.parseUrl('https://x.com/a.jsp?licNo=L1')).toBeNull();
     expect(CnasScraper.parseUrl('not a url')).toBeNull();
+  });
+});
+
+describe('deleteLocalSourceData', () => {
+  it('删除指定机构型源的本地明细和订阅占位', () => {
+    resetDbForTesting();
+    const db = getDb(':memory:');
+    db.prepare(
+      `INSERT INTO cnas_labs (lab_no, lab_name, source_ref, record_count, data_origin)
+       VALUES (?, '本机构', 'L0290', 1, 'scraped')`,
+    ).run(SELF_ORG_ID);
+    db.prepare(
+      `INSERT INTO cnas_qualifications
+       (lab_no, std_code, std_code_norm, std_code_base, std_name)
+       VALUES (?, 'GB 1-2020', 'GB1-2020', 'GB1', '测试')`,
+    ).run(SELF_ORG_ID);
+
+    const res = deleteLocalSourceData(db, 'cnas');
+    expect(res).toEqual({ deletedRows: 1, deletedLab: true });
+    expect((db.prepare('SELECT COUNT(*) AS c FROM cnas_qualifications').get() as { c: number }).c).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) AS c FROM cnas_labs').get() as { c: number }).c).toBe(0);
   });
 });

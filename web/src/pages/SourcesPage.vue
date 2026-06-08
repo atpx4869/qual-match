@@ -9,9 +9,9 @@ import {
   searchProvCma, syncProvCma, syncSubscribedProvCma, subscribeProvCma,
   listCnasPresets, syncCnas, syncSubscribedCnas, subscribeCnas,
   searchNatCma, listNatCmaPlaces, syncNatCma, syncSubscribedNatCma, subscribeNatCma,
-  getSourceSyncProgress, getSourceOrg,
+  getSourceSyncProgress, getSourceOrg, deleteLocalSource, listSubscribedNatCmaPlaces,
   type ProvCmaSearchResult, type CnasPreset, type NatCmaSearchResult, type NatCmaPlace,
-  type SourceOrgState, type OrgSource,
+  type NatCmaSubscribedPlace, type SourceOrgState, type OrgSource,
 } from '@/api/sources';
 import SyncProgressBar from '@/components/SyncProgress.vue';
 
@@ -120,19 +120,22 @@ const SYNC_STATUS_LABEL: Record<string, string> = {
 const cmaOrg = ref<SourceOrgState | null>(null);
 const cnasOrg = ref<SourceOrgState | null>(null);
 const natCmaOrg = ref<SourceOrgState | null>(null);
+const natCmaSubscribedPlaces = ref<NatCmaSubscribedPlace[]>([]);
 const sourceLoading = ref(false);
 
 async function refreshSourceOrgs() {
   sourceLoading.value = true;
   try {
-    const [prov, cnas, nat] = await Promise.all([
+    const [prov, cnas, nat, natPlaces] = await Promise.all([
       getSourceOrg('prov_cma'),
       getSourceOrg('cnas'),
       getSourceOrg('nat_cma'),
+      listSubscribedNatCmaPlaces(),
     ]);
     cmaOrg.value = prov;
     cnasOrg.value = cnas;
     natCmaOrg.value = nat;
+    natCmaSubscribedPlaces.value = natPlaces.items;
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '加载本地存量失败');
   } finally {
@@ -159,6 +162,20 @@ function statusTagType(v: string | null | undefined) {
 
 function isCmaSubscribed(r: ProvCmaSearchResult): boolean {
   return cmaOrg.value?.lab?.sourceRef === r.publicDetailId;
+}
+
+async function onDeleteLocalSource(source: OrgSource, label: string) {
+  try {
+    await ElMessageBox.confirm(`删除「${label}」本地资质明细和订阅信息？此操作不可恢复。`, '确认删除', { type: 'warning' });
+  } catch { return; }
+  try {
+    const res = await deleteLocalSource(source);
+    ElMessage.success(`已删除 ${res.deletedRows} 条本地明细`);
+    await refreshSourceOrgs();
+    if (source === 'cnas') await refreshCnasPresets();
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '删除失败');
+  }
 }
 
 function parseNatCmaSourceRef(raw: string | null | undefined): Partial<NatCmaSearchResult> | null {
@@ -478,6 +495,7 @@ onUnmounted(() => {
           <span class="hint">湖北省级 CMA 公示库 · 先订阅本机构，再同步能力明细入库（归本机构）</span>
           <el-button size="small" @click="refreshSourceOrgs">刷新本地状态</el-button>
           <el-button size="small" type="primary" :disabled="!cmaOrg?.lab?.sourceRef" @click="doCmaSyncSubscribed">同步订阅</el-button>
+          <el-button size="small" type="danger" plain :disabled="!cmaOrg?.lab && !cmaOrg?.localCount" @click="onDeleteLocalSource('prov_cma', '省级 CMA')">删除本地资质</el-button>
         </div>
         <div v-loading="sourceLoading" class="source-status">
           <div class="status-main">
@@ -533,6 +551,7 @@ onUnmounted(() => {
           <span class="hint">CNAS · 先订阅内置本机构，再同步能力明细；缺 Playwright 浏览器时会自动尝试本机 Chrome/Edge</span>
           <el-button size="small" @click="refreshCnasPresets">刷新</el-button>
           <el-button size="small" type="primary" :disabled="!cnasOrg?.lab?.sourceRef" @click="doCnasSyncSubscribed">同步订阅</el-button>
+          <el-button size="small" type="danger" plain :disabled="!cnasOrg?.lab && !cnasOrg?.localCount" @click="onDeleteLocalSource('cnas', 'CNAS')">删除本地资质</el-button>
         </div>
         <div v-loading="sourceLoading" class="source-status">
           <div class="status-main">
@@ -583,6 +602,7 @@ onUnmounted(() => {
           <span class="hint">国家 CMA 认可能力库 · 需先在设置页开启在线抓取，再按机构订阅并同步</span>
           <el-button size="small" @click="refreshSourceOrgs">刷新本地状态</el-button>
           <el-button size="small" type="primary" :disabled="!natCmaOrg?.lab?.sourceRef" @click="doNatCmaSyncSubscribed">同步订阅</el-button>
+          <el-button size="small" type="danger" plain :disabled="!natCmaOrg?.lab && !natCmaOrg?.localCount" @click="onDeleteLocalSource('nat_cma', '国家 CMA')">删除本地资质</el-button>
         </div>
         <div v-loading="sourceLoading" class="source-status">
           <div class="status-main">
@@ -608,6 +628,18 @@ onUnmounted(() => {
           class="source-error"
         />
         <SyncProgressBar v-if="natCmaProgress" :progress="natCmaProgress" style="margin-bottom: 12px" />
+        <el-table
+          v-if="natCmaSubscribedPlaces.length"
+          :data="natCmaSubscribedPlaces"
+          border
+          stripe
+          class="subscribed-place-table"
+        >
+          <el-table-column prop="placeAttr" label="类型" width="100" />
+          <el-table-column prop="placeName" label="已订阅场所" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="placeAddress" label="场所地址" min-width="240" show-overflow-tooltip />
+          <el-table-column prop="localCount" label="本地资质条数" width="130" align="center" />
+        </el-table>
         <div class="query-bar">
           <el-input v-model="natCmaQuery" placeholder="本机构名称，如 湖北省产品质量监督检验研究院" clearable
             style="width: 380px" @keyup.enter="doNatCmaSearch" />
@@ -692,4 +724,5 @@ onUnmounted(() => {
 .status-metrics { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .source-error { margin-bottom: 12px; }
 .dialog-summary { margin-bottom: 12px; }
+.subscribed-place-table { margin-bottom: 12px; }
 </style>

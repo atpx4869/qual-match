@@ -9,6 +9,7 @@ import {
   searchProvCmaLabs, startProvCmaSync, listCnasPresets, startCnasSync,
   subscribeProvCmaLab, subscribeCnasLab,
   searchNatCmaOrgs, listNatCmaPlaces, startNatCmaSync, subscribeNatCmaLab,
+  deleteLocalSourceData, listSubscribedNatCmaPlaces,
 } from '../services/scrape-service';
 import { ORG_SOURCE_TABLE, SELF_ORG_ID, isOrgSource } from '../shared/constants';
 
@@ -167,6 +168,14 @@ export function createSourceRoutes(db: Database.Database): Router {
     } catch (e) { next(normalizeError(e)); }
   });
 
+  // ── 国家 CMA：已订阅场所及本地条数 ──
+  router.get('/api/sources/nat_cma/places/subscribed', (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const items = listSubscribedNatCmaPlaces(db);
+      respond(res, { items: toCamelCase(items), total: items.length });
+    } catch (e) { next(normalizeError(e)); }
+  });
+
   // ── 本机构在某机构型源的已抓概况 ──
   router.get('/api/sources/:source/orgs', (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -180,6 +189,15 @@ export function createSourceRoutes(db: Database.Database): Router {
          FROM ${meta.labTable} WHERE ${meta.orgCol} = ?`,
       ).get(SELF_ORG_ID);
       respond(res, toCamelCase({ source, localCount: cnt.c, lab: lab ?? null }));
+    } catch (e) { next(normalizeError(e)); }
+  });
+
+  // ── 删除某机构型源的本地资质和订阅占位 ──
+  router.delete('/api/sources/:source/local', (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const source = String(req.params.source);
+      if (!isOrgSource(source)) throw new BadRequestError('source 必须是 prov_cma / cnas / nat_cma 之一');
+      respond(res, deleteLocalSourceData(db, source));
     } catch (e) { next(normalizeError(e)); }
   });
 

@@ -379,6 +379,47 @@ export function subscribeNatCmaLab(db: Database.Database, input: NatCmaSubscribe
   });
 }
 
+/** 删除本机构某个机构型源的本地明细和订阅占位。 */
+export function deleteLocalSourceData(db: Database.Database, source: OrgSource): { deletedRows: number; deletedLab: boolean } {
+  const meta = ORG_SOURCE_TABLE[source];
+  const info = db.transaction(() => {
+    const qual = db.prepare(`DELETE FROM ${meta.qualTable} WHERE ${meta.orgCol} = ?`).run(SELF_ORG_ID);
+    const lab = db.prepare(`DELETE FROM ${meta.labTable} WHERE ${meta.orgCol} = ?`).run(SELF_ORG_ID);
+    return { deletedRows: Number(qual.changes), deletedLab: lab.changes > 0 };
+  })();
+  return info;
+}
+
+export interface NatCmaPlaceState {
+  placeId: string;
+  applyId: string;
+  placeAttr: string;
+  placeName: string;
+  placeAddress: string;
+  localCount: number;
+}
+
+/** 国家 CMA 已订阅场所 + 各场所本地明细条数。 */
+export function listSubscribedNatCmaPlaces(db: Database.Database): NatCmaPlaceState[] {
+  const org = getSubscribedNatCmaOrg(db);
+  if (!org?.seeds?.length) return [];
+  const counts = db.prepare(
+    `SELECT test_object, COUNT(*) AS c
+     FROM ${ORG_SOURCE_TABLE.nat_cma.qualTable}
+     WHERE ${ORG_SOURCE_TABLE.nat_cma.orgCol} = ?
+     GROUP BY test_object`,
+  ).all(SELF_ORG_ID) as Array<{ test_object: string; c: number }>;
+  const countMap = new Map(counts.map((r) => [r.test_object, r.c]));
+  return org.seeds.map((seed) => ({
+    placeId: seed.placeId,
+    applyId: seed.applyId,
+    placeAttr: seed.placeAttr ?? '',
+    placeName: seed.placeName || org.orgName || seed.placeId,
+    placeAddress: seed.placeAddress ?? seed.address ?? '',
+    localCount: countMap.get(seed.placeName ?? '') ?? 0,
+  }));
+}
+
 export function startNatCmaSync(db: Database.Database, org?: NatCmaOrg): string {
   if (!isNatCmaScrapeEnabled(db)) throw new Error('请先在设置页开启国家 CMA 在线抓取');
   const target = org ?? getSubscribedNatCmaOrg(db);

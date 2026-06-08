@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from './client';
+import { apiDelete, apiGet, apiPost } from './client';
 import type { SyncProgress } from './cap-lib';
 
 // ─── 类型 ──────────────────────────────────────────────────────────────────
@@ -42,6 +42,15 @@ export interface NatCmaPlaceSeed {
   placeAttr?: string;
   placeName?: string;
   placeAddress?: string;
+}
+
+export interface NatCmaSubscribedPlace {
+  placeId: string;
+  applyId: string;
+  placeAttr: string;
+  placeName: string;
+  placeAddress: string;
+  localCount: number;
 }
 
 export type OrgSource = 'prov_cma' | 'cnas' | 'nat_cma';
@@ -143,4 +152,12 @@ export function getSourceSyncProgress(jobId: string): Promise<SyncProgress> {
 
 export function getSourceOrg(source: OrgSource): Promise<SourceOrgState> {
   return apiGet(`/api/sources/${source}/orgs`);
+}
+
+export function deleteLocalSource(source: OrgSource): Promise<{ deletedRows: number; deletedLab: boolean }> {
+  return apiDelete(`/api/sources/${source}/local`);
+}
+
+export function listSubscribedNatCmaPlaces(): Promise<{ items: NatCmaSubscribedPlace[]; total: number }> {
+  return apiGet('/api/sources/nat_cma/places/subscribed');
 }
