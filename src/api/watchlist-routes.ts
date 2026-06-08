@@ -19,7 +19,7 @@ const pasteSchema = z.object({
 
 const matchQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional().default(1),
-  pageSize: z.coerce.number().int().refine((v) => [200, 300, 500, 1000, 2000].includes(v), 'pageSize 必须是 200/300/500/1000/2000').optional().default(500),
+  pageSize: z.coerce.number().int().refine((v) => [200, 300, 500, 1000, 2000].includes(v), 'pageSize 必须是 200/300/500/1000/2000').optional().default(200),
   filter: z.enum(['all', 'covered', 'uncovered']).optional().default('all'),
   keyword: z.string().trim().optional().default(''),
   // 排序：清单文本列（seq=原始导入顺序）

@@ -33,7 +33,7 @@ const creating = ref(false);
 const filterMode = ref<'all' | 'uncovered' | 'covered'>('all');
 const keyword = ref('');
 const page = ref(1);
-const pageSize = ref(500);
+const pageSize = ref(200);
 
 // 排序（服务端）：seq=原始导入顺序
 const sortBy = ref<MatchSortBy>('seq');
@@ -249,7 +249,7 @@ onMounted(async () => {
 
       <el-table
         :data="filteredResults" v-loading="loading" :row-class-name="rowClass"
-        border stripe height="calc(100vh - 285px)"
+        border stripe
         @sort-change="onSortChange"
       >
         <el-table-column prop="stdCode" label="标准号" width="180" fixed sortable="custom" />

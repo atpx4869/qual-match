@@ -256,7 +256,7 @@ export function matchWatchlist(db: Database.Database, watchlistId: number, opts:
   const page = clampPage(opts.page);
   const effectivePageSize = opts.pageSize === undefined
     ? Math.max(1, filteredTotal)
-    : clampPageSize(opts.pageSize, 500);
+    : clampPageSize(opts.pageSize, 200);
   const start = opts.pageSize === undefined ? 0 : (page - 1) * effectivePageSize;
   const results = filtered.slice(start, start + effectivePageSize);
 
