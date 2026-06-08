@@ -8,7 +8,7 @@ import { getSyncProgress } from '../services/sync-progress';
 import {
   searchProvCmaLabs, startProvCmaSync, listCnasPresets, startCnasSync,
   subscribeProvCmaLab, subscribeCnasLab,
-  searchNatCmaOrgs, startNatCmaSync, subscribeNatCmaLab,
+  searchNatCmaOrgs, listNatCmaPlaces, startNatCmaSync, subscribeNatCmaLab,
 } from '../services/scrape-service';
 import { ORG_SOURCE_TABLE, SELF_ORG_ID, isOrgSource } from '../shared/constants';
 
@@ -92,6 +92,32 @@ export function createSourceRoutes(db: Database.Database): Router {
   });
 
   // ── 国家 CMA：订阅机构 ──
+  const natCmaSeedSchema = z.object({
+    placeId: z.string().trim().min(1),
+    applyId: z.string().trim().min(1),
+    address: z.string().trim().optional().default(''),
+    placeAttr: z.string().trim().optional().default(''),
+    placeName: z.string().trim().optional().default(''),
+    placeAddress: z.string().trim().optional().default(''),
+  });
+
+  // ── 国家 CMA：列出机构场所 ──
+  router.post('/api/sources/nat_cma/places', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const body = z.object({
+        certCode: z.string().trim().default(''),
+        orgName: z.string().trim().min(1),
+        address: z.string().trim().optional().default(''),
+        placeId: z.string().trim().min(1),
+        applyId: z.string().trim().min(1),
+        seeds: z.array(natCmaSeedSchema).optional(),
+      }).parse(req.body);
+      const items = await listNatCmaPlaces(db, body);
+      respond(res, { items: toCamelCase(items), total: items.length });
+    } catch (e) { next(normalizeError(e)); }
+  });
+
+  // ── 国家 CMA：订阅机构下的场所 ──
   router.post('/api/sources/nat_cma/subscribe', (req: Request, res: Response, next: NextFunction) => {
     try {
       const body = z.object({
@@ -100,6 +126,7 @@ export function createSourceRoutes(db: Database.Database): Router {
         placeId: z.string().trim().min(1),
         applyId: z.string().trim().min(1),
         region: z.string().trim().optional().default(''),
+        seeds: z.array(natCmaSeedSchema).min(1, '请至少选择一个场所').optional(),
       }).parse(req.body);
       subscribeNatCmaLab(db, body);
       respond(res, { ok: true });
@@ -114,9 +141,17 @@ export function createSourceRoutes(db: Database.Database): Router {
         orgName: z.string().trim().optional(),
         placeId: z.string().trim().optional(),
         applyId: z.string().trim().optional(),
+        seeds: z.array(natCmaSeedSchema).optional(),
       }).parse(req.body ?? {});
       const org = (body.placeId && body.applyId)
-        ? { placeId: body.placeId, applyId: body.applyId, certCode: body.certCode ?? '', orgName: body.orgName ?? '', address: '' }
+        ? {
+            placeId: body.placeId,
+            applyId: body.applyId,
+            certCode: body.certCode ?? '',
+            orgName: body.orgName ?? '',
+            address: '',
+            seeds: body.seeds,
+          }
         : undefined;
       const jobId = startNatCmaSync(db, org);
       respond(res, { jobId });

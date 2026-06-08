@@ -33,12 +33,23 @@ export interface NatCmaScrapeOpts {
 }
 
 /** list 命中的机构行。 */
+export interface NatCmaOrgSeed {
+  placeId: string;
+  applyId: string;
+  address?: string;
+  placeAttr?: string;
+  placeName?: string;
+  placeAddress?: string;
+}
+
 export interface NatCmaOrg {
   certCode: string;
   orgName: string;
   address: string;
   placeId: string;
   applyId: string;
+  /** 同一机构在 list 中可能出现多个场所/申请入口；同步时全部展开并去重。 */
+  seeds?: NatCmaOrgSeed[];
 }
 
 /** 机构下的一个场所。 */
@@ -135,6 +146,20 @@ export class NatCmaScraper {
     }
   }
 
+  /** 列出一个机构入口下的所有场所，供前端做二级订阅选择。 */
+  async listPlaces(org: NatCmaOrg, opts: NatCmaScrapeOpts = {}): Promise<NatCmaPlace[]> {
+    const { page, release } = await this.openPage(opts.chromePath);
+    try {
+      await page.addScriptTag({ content: PAGE_HELPERS });
+      return (await page.evaluate(async (args) => {
+        // @ts-expect-error 注入的页内 helper
+        return await window.__natcma_listPlaces(args.placeId, args.applyId);
+      }, { placeId: org.placeId, applyId: org.applyId })) as NatCmaPlace[];
+    } finally {
+      await release();
+    }
+  }
+
   /**
    * 抓一个机构所有场所的资质明细。每个场所、每页各过一次滑块。
    * onProgress(fetched,total) 汇报合计进度（total 为各场所声明条数之和，首场所拿到后才已知）。
@@ -150,11 +175,38 @@ export class NatCmaScraper {
     try {
       await page.addScriptTag({ content: PAGE_HELPERS });
 
-      // 1) 先列出所有场所
-      const places = (await page.evaluate(async (args) => {
-        // @ts-expect-error 注入的页内 helper
-        return await window.__natcma_listPlaces(args.placeId, args.applyId);
-      }, { placeId: org.placeId, applyId: org.applyId })) as NatCmaPlace[];
+      // 1) 确定要抓的场所。已有订阅 seeds 时只抓用户选择的场所；否则回退为展开入口下所有场所。
+      const seeds = org.seeds?.length ? org.seeds : [{ placeId: org.placeId, applyId: org.applyId, address: org.address }];
+      const places: NatCmaPlace[] = [];
+      const seenPlaces = new Set<string>();
+      const applyByPlace = new Map<string, string>();
+      if (org.seeds?.length) {
+        for (const seed of seeds) {
+          if (seenPlaces.has(seed.placeId)) continue;
+          seenPlaces.add(seed.placeId);
+          places.push({
+            placeAttr: seed.placeAttr ?? '',
+            placeName: seed.placeName ?? org.orgName,
+            placeAddress: seed.placeAddress ?? seed.address ?? org.address,
+            placeId: seed.placeId,
+          });
+          applyByPlace.set(seed.placeId, seed.applyId);
+        }
+      } else {
+        const listed = (await page.evaluate(async (args) => {
+          // @ts-expect-error 注入的页内 helper
+          return await window.__natcma_listPlaces(args.placeId, args.applyId);
+        }, { placeId: org.placeId, applyId: org.applyId })) as NatCmaPlace[];
+        const expanded = listed.length
+          ? listed
+          : [{ placeAttr: '', placeName: org.orgName, placeAddress: org.address, placeId: org.placeId }];
+        for (const p of expanded) {
+          if (seenPlaces.has(p.placeId)) continue;
+          seenPlaces.add(p.placeId);
+          places.push(p);
+          applyByPlace.set(p.placeId, org.applyId);
+        }
+      }
 
       // 2) 逐场所、逐页抓明细
       const capabilities: NatCmaCapability[] = [];
@@ -166,7 +218,7 @@ export class NatCmaScraper {
         const first = (await page.evaluate(async (args) => {
           // @ts-expect-error 注入的页内 helper
           return await window.__natcma_fetchPlacePage(args.placeId, args.applyId, args.pageNo, args.pageSize);
-        }, { placeId: p.placeId, applyId: org.applyId, pageNo: 1, pageSize: 50 })) as {
+        }, { placeId: p.placeId, applyId: applyByPlace.get(p.placeId) ?? org.applyId, pageNo: 1, pageSize: 50 })) as {
           total: number; rows: Array<Omit<NatCmaCapability, 'placeName' | 'placeAddress'>>;
         };
         placeTotals.push(first.total || 0);
@@ -186,7 +238,7 @@ export class NatCmaScraper {
           const more = (await page.evaluate(async (args) => {
             // @ts-expect-error 注入的页内 helper
             return await window.__natcma_fetchPlacePage(args.placeId, args.applyId, args.pageNo, args.pageSize);
-          }, { placeId: p.placeId, applyId: org.applyId, pageNo, pageSize })) as {
+          }, { placeId: p.placeId, applyId: applyByPlace.get(p.placeId) ?? org.applyId, pageNo, pageSize })) as {
             total: number; rows: Array<Omit<NatCmaCapability, 'placeName' | 'placeAddress'>>;
           };
           if (!more.rows.length) break;

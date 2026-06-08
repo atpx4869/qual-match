@@ -9,7 +9,9 @@ import {
 import { CmaScraper, type CmaCapability, type CmaDetail } from '../sources/prov-cma/cma-scraper';
 import { CnasScraper, type CnasCapability, type CnasLabInfo } from '../sources/cnas/cnas-scraper';
 import { PRESET_CNAS_LABS } from '../sources/cnas/preset-cnas-labs';
-import { NatCmaScraper, type NatCmaCapability, type NatCmaOrg } from '../sources/nat-cma/nat-cma-scraper';
+import {
+  NatCmaScraper, type NatCmaCapability, type NatCmaOrg, type NatCmaOrgSeed,
+} from '../sources/nat-cma/nat-cma-scraper';
 
 /**
  * 抓取入库编排（阶段 4 + 国家 CMA）。把省级 CMA / CNAS / 国家 CMA 抓取器的产出统一：
@@ -333,9 +335,19 @@ function mapCnas(c: CnasCapability): Record<string, string> {
 
 // ─── 国家 CMA 同步 ────────────────────────────────────────────────────────────
 /** 国家 CMA 按机构名搜候选机构（同步，直接 await 抓取器）。 */
-export function searchNatCmaOrgs(db: Database.Database, orgName: string) {
+export async function searchNatCmaOrgs(db: Database.Database, orgName: string): Promise<NatCmaOrg[]> {
   if (!isNatCmaScrapeEnabled(db)) throw new Error('请先在设置页开启国家 CMA 在线抓取');
-  return natCmaScraper.searchOrgs(orgName, {
+  const rows = await natCmaScraper.searchOrgs(orgName, {
+    chromePath: getNatCmaChromePath(db),
+    throttleMs: getNatCmaThrottleMs(db),
+  });
+  return groupNatCmaOrgRows(rows);
+}
+
+/** 国家 CMA：列出候选机构下的所有场所，供用户二级订阅。 */
+export function listNatCmaPlaces(db: Database.Database, org: NatCmaOrg) {
+  if (!isNatCmaScrapeEnabled(db)) throw new Error('请先在设置页开启国家 CMA 在线抓取');
+  return natCmaScraper.listPlaces(org, {
     chromePath: getNatCmaChromePath(db),
     throttleMs: getNatCmaThrottleMs(db),
   });
@@ -347,6 +359,7 @@ export interface NatCmaSubscribeInput {
   placeId: string;
   applyId: string;
   region?: string;
+  seeds?: NatCmaOrgSeed[];
 }
 
 /** 订阅国家 CMA 机构：把机构标识(placeId/applyId/orgName)写入 labs 的 source_ref(JSON)。 */
@@ -354,6 +367,7 @@ export function subscribeNatCmaLab(db: Database.Database, input: NatCmaSubscribe
   const count = countLocalRows(db, 'nat_cma');
   const sourceRef = JSON.stringify({
     placeId: input.placeId, applyId: input.applyId, certCode: input.certCode, orgName: input.orgName,
+    seeds: normalizeNatCmaSeeds(input),
   });
   upsertLabRow(db, 'nat_cma', {
     labName: input.orgName,
@@ -409,12 +423,63 @@ function getSubscribedNatCmaOrg(db: Database.Database): NatCmaOrg | null {
   const raw = row?.source_ref?.trim();
   if (!raw) return null;
   try {
-    const j = JSON.parse(raw) as { placeId: string; applyId: string; certCode?: string; orgName?: string };
+    const j = JSON.parse(raw) as {
+      placeId: string; applyId: string; certCode?: string; orgName?: string; seeds?: NatCmaOrgSeed[];
+    };
     if (!j.placeId || !j.applyId) return null;
-    return { placeId: j.placeId, applyId: j.applyId, certCode: j.certCode ?? '', orgName: j.orgName ?? '', address: '' };
+    return {
+      placeId: j.placeId,
+      applyId: j.applyId,
+      certCode: j.certCode ?? '',
+      orgName: j.orgName ?? '',
+      address: '',
+      seeds: normalizeNatCmaSeeds(j),
+    };
   } catch {
     return null;
   }
+}
+
+function groupNatCmaOrgRows(rows: NatCmaOrg[]): NatCmaOrg[] {
+  const groups = new Map<string, NatCmaOrg>();
+  for (const row of rows) {
+    const key = `${row.certCode || ''}::${row.orgName || ''}`;
+    const seed: NatCmaOrgSeed = { placeId: row.placeId, applyId: row.applyId, address: row.address };
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, { ...row, seeds: [seed] });
+      continue;
+    }
+    existing.address = existing.address || row.address;
+    const duplicated = existing.seeds?.some((s) => s.placeId === seed.placeId && s.applyId === seed.applyId);
+    if (!duplicated) existing.seeds = [...(existing.seeds ?? []), seed];
+  }
+  return [...groups.values()];
+}
+
+function normalizeNatCmaSeeds(input: {
+  placeId: string;
+  applyId: string;
+  region?: string;
+  address?: string;
+  seeds?: NatCmaOrgSeed[];
+}): NatCmaOrgSeed[] {
+  const out: NatCmaOrgSeed[] = [];
+  const add = (seed: NatCmaOrgSeed) => {
+    if (!seed.placeId || !seed.applyId) return;
+    if (out.some((s) => s.placeId === seed.placeId && s.applyId === seed.applyId)) return;
+    out.push({
+      placeId: seed.placeId,
+      applyId: seed.applyId,
+      address: seed.address ?? seed.placeAddress ?? '',
+      placeAttr: seed.placeAttr ?? '',
+      placeName: seed.placeName ?? '',
+      placeAddress: seed.placeAddress ?? seed.address ?? '',
+    });
+  };
+  for (const seed of input.seeds ?? []) add(seed);
+  add({ placeId: input.placeId, applyId: input.applyId, address: input.address ?? input.region ?? '' });
+  return out;
 }
 
 function mapNatCma(c: NatCmaCapability): Record<string, string> {

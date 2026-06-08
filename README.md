@@ -121,7 +121,8 @@ WAL 一致）；迁移时把下载的 `.db` 放回目标机 `data/qual-match.db`
   （下载受限环境可设 `CNAS_CHROME_PATH` 用现成 Chrome，免下载 playwright 自带 chromium。）
 - [x] **阶段 5 · 国家 CMA 在线抓取**：原滑块「止损」已翻案（2026-06-08）。滑块缺口直检（Sobel）
   20/20 稳定 + 三层下钻（list 机构 → 场所 → formAbility 明细，提交带 finalX）+ 按场所遍历。
-  后端抓取器/service/路由已落地并联网验证（实测 5 场所 10955 条）；前端国家 CMA tab 已接入搜索/订阅/同步/进度。
+  后端抓取器/service/路由已落地并联网验证（实测 5 场所 10955 条）；前端国家 CMA tab 已接入
+  机构搜索 → 场所列表弹窗 → 场所订阅 → 同步/进度。
   Excel 导入降级仍保留。
   （同 CNAS，下载受限环境可设 `NAT_CMA_CHROME_PATH` 用现成 Chrome。）
 - [x] **阶段 6 · 打磨**：设置页（数据总览 + CNAS/国家 CMA 浏览器路径/节流可配 + 国家 CMA 开关 + 全库备份下载）、部署说明。

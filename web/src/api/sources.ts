@@ -25,6 +25,23 @@ export interface NatCmaSearchResult {
   address: string;
   placeId: string;
   applyId: string;
+  seeds?: NatCmaPlaceSeed[];
+}
+
+export interface NatCmaPlace {
+  placeAttr: string;
+  placeName: string;
+  placeAddress: string;
+  placeId: string;
+}
+
+export interface NatCmaPlaceSeed {
+  placeId: string;
+  applyId: string;
+  address?: string;
+  placeAttr?: string;
+  placeName?: string;
+  placeAddress?: string;
 }
 
 export type OrgSource = 'prov_cma' | 'cnas' | 'nat_cma';
@@ -91,12 +108,17 @@ export function searchNatCma(q: string): Promise<{ items: NatCmaSearchResult[]; 
   return apiGet(`/api/sources/nat_cma/search?q=${encodeURIComponent(q)}`);
 }
 
+export function listNatCmaPlaces(item: NatCmaSearchResult): Promise<{ items: NatCmaPlace[]; total: number }> {
+  return apiPost('/api/sources/nat_cma/places', item);
+}
+
 export function syncNatCma(item: NatCmaSearchResult): Promise<{ jobId: string }> {
   return apiPost('/api/sources/nat_cma/sync', {
     certCode: item.certCode,
     orgName: item.orgName,
     placeId: item.placeId,
     applyId: item.applyId,
+    seeds: item.seeds,
   });
 }
 
@@ -111,6 +133,7 @@ export function subscribeNatCma(item: NatCmaSearchResult): Promise<{ ok: boolean
     placeId: item.placeId,
     applyId: item.applyId,
     region: item.address,
+    seeds: item.seeds,
   });
 }
 

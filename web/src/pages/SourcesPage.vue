@@ -8,9 +8,10 @@ import {
 import {
   searchProvCma, syncProvCma, syncSubscribedProvCma, subscribeProvCma,
   listCnasPresets, syncCnas, syncSubscribedCnas, subscribeCnas,
-  searchNatCma, syncNatCma, syncSubscribedNatCma, subscribeNatCma,
+  searchNatCma, listNatCmaPlaces, syncNatCma, syncSubscribedNatCma, subscribeNatCma,
   getSourceSyncProgress, getSourceOrg,
-  type ProvCmaSearchResult, type CnasPreset, type NatCmaSearchResult, type SourceOrgState, type OrgSource,
+  type ProvCmaSearchResult, type CnasPreset, type NatCmaSearchResult, type NatCmaPlace,
+  type SourceOrgState, type OrgSource,
 } from '@/api/sources';
 import SyncProgressBar from '@/components/SyncProgress.vue';
 
@@ -172,7 +173,8 @@ function parseNatCmaSourceRef(raw: string | null | undefined): Partial<NatCmaSea
 function natCmaRefLabel(raw: string | null | undefined): string {
   const parsed = parseNatCmaSourceRef(raw);
   if (!parsed) return raw || '—';
-  return [parsed.certCode, parsed.placeId].filter(Boolean).join(' / ') || '—';
+  const placeCount = parsed.seeds?.length ? ` · ${parsed.seeds.length} 个场所` : '';
+  return ([parsed.certCode, parsed.placeId].filter(Boolean).join(' / ') || '—') + placeCount;
 }
 
 function isNatCmaSubscribed(r: NatCmaSearchResult): boolean {
@@ -284,6 +286,11 @@ const natCmaQuery = ref('');
 const natCmaSearching = ref(false);
 const natCmaResults = ref<NatCmaSearchResult[]>([]);
 const natCmaProgress = ref<SyncProgress | null>(null);
+const natCmaPlaceDialogVisible = ref(false);
+const natCmaPlaceLoading = ref(false);
+const natCmaPlaceOrg = ref<NatCmaSearchResult | null>(null);
+const natCmaPlaces = ref<NatCmaPlace[]>([]);
+const natCmaSelectedPlaces = ref<NatCmaPlace[]>([]);
 let natCmaTimer: ReturnType<typeof setInterval> | null = null;
 
 async function doNatCmaSearch() {
@@ -297,6 +304,47 @@ async function doNatCmaSearch() {
     ElMessage.error(e instanceof Error ? e.message : '搜索失败');
   } finally {
     natCmaSearching.value = false;
+  }
+}
+
+function withSelectedNatCmaPlaces(): NatCmaSearchResult | null {
+  const org = natCmaPlaceOrg.value;
+  if (!org) return null;
+  if (!natCmaSelectedPlaces.value.length) {
+    ElMessage.warning('请至少选择一个场所');
+    return null;
+  }
+  return {
+    ...org,
+    seeds: natCmaSelectedPlaces.value.map((p) => ({
+      placeId: p.placeId,
+      applyId: org.applyId,
+      address: p.placeAddress,
+      placeAttr: p.placeAttr,
+      placeName: p.placeName,
+      placeAddress: p.placeAddress,
+    })),
+  };
+}
+
+function onNatCmaPlaceSelectionChange(rows: NatCmaPlace[]) {
+  natCmaSelectedPlaces.value = rows;
+}
+
+async function openNatCmaPlaces(r: NatCmaSearchResult) {
+  natCmaPlaceOrg.value = r;
+  natCmaPlaces.value = [];
+  natCmaSelectedPlaces.value = [];
+  natCmaPlaceDialogVisible.value = true;
+  natCmaPlaceLoading.value = true;
+  try {
+    const res = await listNatCmaPlaces(r);
+    natCmaPlaces.value = res.items;
+    if (!res.items.length) ElMessage.warning('该机构未返回场所列表');
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '加载场所失败');
+  } finally {
+    natCmaPlaceLoading.value = false;
   }
 }
 
@@ -319,6 +367,20 @@ async function doNatCmaSubscribe(r: NatCmaSearchResult) {
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '订阅失败');
   }
+}
+
+async function doNatCmaSubscribeSelected() {
+  const item = withSelectedNatCmaPlaces();
+  if (!item) return;
+  await doNatCmaSubscribe(item);
+  natCmaPlaceDialogVisible.value = false;
+}
+
+async function doNatCmaSyncSelected() {
+  const item = withSelectedNatCmaPlaces();
+  if (!item) return;
+  await doNatCmaSync(item);
+  natCmaPlaceDialogVisible.value = false;
 }
 
 async function doNatCmaSyncSubscribed() {
@@ -555,21 +617,53 @@ onUnmounted(() => {
           <el-table-column prop="orgName" label="机构名称" min-width="240" show-overflow-tooltip />
           <el-table-column prop="certCode" label="证书编号" width="150" show-overflow-tooltip />
           <el-table-column prop="address" label="地址" min-width="220" show-overflow-tooltip />
-          <el-table-column label="场所标识" width="160" show-overflow-tooltip>
-            <template #default="{ row }">{{ (row as NatCmaSearchResult).placeId }}</template>
+          <el-table-column label="候选入口" width="100" align="center">
+            <template #default="{ row }">{{ (row as NatCmaSearchResult).seeds?.length || 1 }}</template>
           </el-table-column>
           <el-table-column label="订阅" width="100" align="center">
             <template #default="{ row }">
               <el-tag v-if="isNatCmaSubscribed(row as NatCmaSearchResult)" type="success" size="small">当前</el-tag>
-              <el-button v-else size="small" @click="doNatCmaSubscribe(row as NatCmaSearchResult)">订阅</el-button>
+              <span v-else>—</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="130">
             <template #default="{ row }">
-              <el-button size="small" type="primary" @click="doNatCmaSync(row as NatCmaSearchResult)">订阅并同步</el-button>
+              <el-button size="small" type="primary" @click="openNatCmaPlaces(row as NatCmaSearchResult)">选择场所</el-button>
             </template>
           </el-table-column>
         </el-table>
+
+        <el-dialog
+          v-model="natCmaPlaceDialogVisible"
+          title="订阅国家 CMA 场所"
+          width="760px"
+        >
+          <div class="dialog-summary">
+            <div class="status-title">{{ natCmaPlaceOrg?.orgName }}</div>
+            <div class="status-sub">
+              <span>证书编号：{{ natCmaPlaceOrg?.certCode || '—' }}</span>
+              <span>机构地址：{{ natCmaPlaceOrg?.address || '—' }}</span>
+            </div>
+          </div>
+          <el-table
+            :data="natCmaPlaces"
+            v-loading="natCmaPlaceLoading"
+            border
+            stripe
+            max-height="420"
+            @selection-change="onNatCmaPlaceSelectionChange"
+          >
+            <el-table-column type="selection" width="48" />
+            <el-table-column prop="placeAttr" label="类型" width="100" />
+            <el-table-column prop="placeName" label="场所名称" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="placeAddress" label="场所地址" min-width="240" show-overflow-tooltip />
+          </el-table>
+          <template #footer>
+            <el-button @click="natCmaPlaceDialogVisible = false">取消</el-button>
+            <el-button :disabled="!natCmaSelectedPlaces.length" @click="doNatCmaSubscribeSelected">订阅场所</el-button>
+            <el-button type="primary" :disabled="!natCmaSelectedPlaces.length" @click="doNatCmaSyncSelected">订阅并同步</el-button>
+          </template>
+        </el-dialog>
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -597,4 +691,5 @@ onUnmounted(() => {
 .status-sub { display: flex; gap: 14px; flex-wrap: wrap; color: var(--el-text-color-secondary); font-size: 12px; }
 .status-metrics { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .source-error { margin-bottom: 12px; }
+.dialog-summary { margin-bottom: 12px; }
 </style>

@@ -192,7 +192,8 @@ web/src/                    前端（Vue3 + Vite + Element Plus，ESM）
     scrape-service 的 `searchNatCmaOrgs/subscribeNatCmaLab/startNatCmaSync`、source-routes 的
     `/api/sources/nat_cma/search·subscribe·sync`。后端类型检查 + 65 单测通过；联网验证
     (湖北省产品质量监督检验研究院 5 场所合计 10955 条，标准号正确)。
-  - **前端已补**：SourcesPage 的「国家 CMA」tab 已支持搜机构→订阅→抓取→进度；api/sources.ts 已有对应函数。
+  - **前端已补**：SourcesPage 的「国家 CMA」tab 已支持搜机构→弹出场所列表→勾选场所订阅→抓取→进度；
+    api/sources.ts 已有对应函数。订阅粒度是场所，不是机构行；同步只抓已订阅场所，避免多地点机构漏抓或误抓。
     设置页已接入 `nat_cma_scrape_enabled` 开关、国家 CMA 浏览器路径和节流设置（默认关闭，需用户确认开启）。
     浏览器退路：可设 `NAT_CMA_CHROME_PATH` 指向系统 Chrome
     (`C:/Program Files/Google/Chrome/Application/chrome.exe`)，或 `npx playwright install chromium`；

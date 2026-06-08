@@ -9,7 +9,8 @@
 > ✅ 阶段 2 综合查询 + ✅ 阶段 3 一单一库自动同步（MVP 闭环）+ ✅ 阶段 4 省级 CMA/CNAS 抓取
 > （省级 CMA 联网验证 28110 条、CNAS 联网验证 7451 条，均匹配命中，2026-06-05），
 > ✅ 阶段 6 打磨（设置页 / 部署说明 / 全库备份，2026-06-07）。
-> ✅ 阶段 5 国家 CMA 在线抓取已打通（2026-06-08，滑块缺口直检 + 三层下钻，原止损翻案；前后端已接入，Excel 导入降级仍保留）。
+> ✅ 阶段 5 国家 CMA 在线抓取已打通（2026-06-08，滑块缺口直检 + 三层下钻，原止损翻案；前后端已接入，
+> 按场所订阅后同步，Excel 导入降级仍保留）。
 
 ---
 
@@ -453,7 +454,8 @@ insert.run(target, stdCode, norm, base, /* ...其余字段 */);
 当前策略：
 
 - 后端实现 `src/sources/nat-cma/nat-cma-scraper.ts`，service/routes 接入 `/api/sources/nat_cma/search|subscribe|sync`。
-- 前端 `SourcesPage` 已接入国家 CMA tab，支持搜索、订阅、同步和进度轮询。
+- 前端 `SourcesPage` 已接入国家 CMA tab，支持搜索机构、弹出场所列表、勾选场所订阅、同步和进度轮询。
+  国家 CMA 订阅粒度是场所：同一机构可能有多地点资质明细，同步只抓用户订阅的场所。
 - 设置页提供 `nat_cma_scrape_enabled` 开关、国家 CMA 浏览器路径和节流设置；默认关闭，用户确认后启用。
 - Excel 导入降级仍保留，导入明细与在线抓取一样参与主匹配、综合查询和导出。
 
@@ -811,7 +813,7 @@ server: { proxy: { '/api': 'http://localhost:3000' } }
 #### 阶段 5 · 国家 CMA 在线抓取 ✅ 完成
 
 - `poc/` 已验证滑块缺口直检与三层下钻链路，后端抓取器/service/routes 已接入。
-- 前端 SourcesPage 国家 CMA tab 已支持搜索、订阅、同步和进度轮询。
+- 前端 SourcesPage 国家 CMA tab 已支持搜索机构、场所选择订阅、同步和进度轮询。
 - 设置页已提供国家 CMA 抓取开关、浏览器路径和节流配置。
 - `/api/import/qualifications` 导入国家 CMA Excel 明细的降级路径仍保留。
 
